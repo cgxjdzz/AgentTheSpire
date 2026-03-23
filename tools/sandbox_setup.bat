@@ -34,11 +34,11 @@ xcopy /E /I /Q C:\AgentTheSpire_host C:\AgentTheSpire_test
 cd /d C:\AgentTheSpire_test
 echo [OK] 복사 완료
 
-:: ── 4. install.bat 실행 (로컬 이미지 생성 미포함) ───────────
+:: ── 4. tools\install.bat 执行 (不含本地图像生成) ───────────
 echo.
-echo [4/5] install.bat 실행...
-echo n | call install.bat
-if errorlevel 1 ( echo [FAIL] install.bat 실패 & goto :error )
+echo [4/5] tools\install.bat 执行...
+echo n | call tools\install.bat
+if errorlevel 1 ( echo [FAIL] tools\install.bat 失败 & goto :error )
 
 :: ── 5. 결과 검증 ────────────────────────────────────────────
 echo.
@@ -79,3 +79,7 @@ python --version >> C:\sandbox_output\result.txt 2>&1
 node --version >> C:\sandbox_output\result.txt 2>&1
 pip show fastapi >> C:\sandbox_output\result.txt 2>&1
 if exist "C:\AgentTheSpire_test\frontend\dist\index.html" echo frontend build: OK >> C:\sandbox_output\result.txt
+
+
+
+

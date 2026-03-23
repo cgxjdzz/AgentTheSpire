@@ -14,6 +14,7 @@ import litellm
 
 from config import get_config
 from agents.sts2_docs import get_planner_api_hints
+from llm.text_runner import complete_text, resolve_model
 
 AssetItemType = Literal["card", "card_fullscreen", "relic", "power", "character", "custom_code"]
 
@@ -104,31 +105,10 @@ async def plan_mod(requirements: str) -> ModPlan:
     prompt = _build_planner_prompt(requirements)
 
     try:
-        if llm_cfg.get("mode") == "claude_subscription":
-            raw_json = await _plan_via_claude_cli(prompt)
-        else:
-            raw_json = await _plan_via_litellm(prompt, llm_cfg)
-
+        raw_json = await complete_text(prompt, llm_cfg)
         return _parse_plan(raw_json)
     except Exception as e:
         raise RuntimeError(f"规划失败: {type(e).__name__}: {e}") from e
-
-
-async def _plan_via_claude_cli(prompt: str) -> str:
-    loop = asyncio.get_event_loop()
-    result = await loop.run_in_executor(
-        None,
-        lambda: subprocess.run(
-            ["claude", "--print", "-p", prompt],
-            capture_output=True,
-        ),
-    )
-    text = result.stdout.decode("utf-8", errors="replace").strip()
-    start = text.find("{")
-    end = text.rfind("}") + 1
-    if start == -1 or end <= start:
-        raise ValueError(f"claude CLI 返回了无效 JSON: {text[:200]}")
-    return text[start:end]
 
 
 async def _plan_via_litellm(prompt: str, llm_cfg: dict) -> str:
@@ -140,7 +120,7 @@ async def _plan_via_litellm(prompt: str, llm_cfg: dict) -> str:
         "qwen":      "openai/qwen-plus",
         "zhipu":     "zhipuai/glm-4-flash",
     }
-    model = _model_map.get(provider, "claude-sonnet-4-6")
+    model = resolve_model({"provider": provider, **llm_cfg})
     response = await litellm.acompletion(
         model=model,
         messages=[{"role": "user", "content": prompt}],

@@ -9,6 +9,7 @@ from typing import Literal
 import litellm
 
 from config import get_config
+from llm.text_runner import complete_text, resolve_model
 
 ImageProvider = Literal["flux2", "sdxl", "jimeng", "wanxiang"]
 
@@ -128,10 +129,8 @@ async def adapt_prompt(
     )
 
     try:
-        if llm_cfg.get("mode") == "claude_subscription":
-            result = await _adapt_via_claude_cli(full_prompt, user_description, provider, needs_transparent_bg)
-        else:
-            result = await _adapt_via_litellm(full_prompt, llm_cfg, user_description, provider, needs_transparent_bg)
+        raw = await complete_text(full_prompt, llm_cfg)
+        result = _parse_json_result(raw)
     except Exception as e:
         result = _fallback_prompt(user_description, provider, needs_transparent_bg)
         result["fallback_warning"] = f"提示词 AI 优化失败，已使用模板回退。原因：{type(e).__name__}: {e}"
@@ -142,40 +141,16 @@ async def adapt_prompt(
     return result
 
 
-async def _adapt_via_claude_cli(
-    prompt: str,
-    user_description: str,
-    provider: ImageProvider,
-    needs_transparent_bg: bool,
-) -> dict:
-    """用 claude CLI subprocess 做 prompt 适配（订阅模式）。"""
-    import asyncio
+def _parse_json_result(text: str) -> dict:
     import json as _json
-    import subprocess
 
-    loop = asyncio.get_event_loop()
-    result = await asyncio.wait_for(
-        loop.run_in_executor(
-            None,
-            lambda: subprocess.run(
-                ["claude", "--print", "-p", prompt],
-                capture_output=True, timeout=30,
-            ),
-        ),
-        timeout=35,
-    )
-    text = result.stdout.decode("utf-8", errors="replace").strip()
-
-    # 找 JSON 块
     start = text.find("{")
-    end   = text.rfind("}") + 1
-    if start != -1 and end > start:
-        result = _json.loads(text[start:end])
-        return {
-            "prompt": result.get("prompt", ""),
-            "negative_prompt": result.get("negative_prompt"),
-        }
-    raise ValueError("claude CLI returned no valid JSON")
+    end = text.rfind("}") + 1
+    result = _json.loads(text[start:end] if start != -1 else text)
+    return {
+        "prompt": result.get("prompt", ""),
+        "negative_prompt": result.get("negative_prompt"),
+    }
 
 
 async def _adapt_via_litellm(
@@ -186,9 +161,7 @@ async def _adapt_via_litellm(
     needs_transparent_bg: bool,
 ) -> dict:
     """用 litellm 做 prompt 适配（API key 模式）。"""
-    import json as _json
-
-    model = _resolve_model(llm_cfg)
+    model = resolve_model(llm_cfg)
     response = await litellm.acompletion(
         model=model,
         messages=[{"role": "user", "content": prompt}],
@@ -196,15 +169,7 @@ async def _adapt_via_litellm(
         api_base=llm_cfg.get("base_url") or None,
         temperature=0.3,
     )
-    text = response.choices[0].message.content.strip()
-    # 兼容模型在 JSON 外包 markdown 代码块的情况
-    start = text.find("{")
-    end   = text.rfind("}") + 1
-    result = _json.loads(text[start:end] if start != -1 else text)
-    return {
-        "prompt": result.get("prompt", ""),
-        "negative_prompt": result.get("negative_prompt"),
-    }
+    return _parse_json_result(response.choices[0].message.content.strip())
 
 
 def _fallback_prompt(description: str, provider: ImageProvider, needs_transparent_bg: bool) -> dict:
@@ -228,15 +193,3 @@ def _fallback_prompt(description: str, provider: ImageProvider, needs_transparen
         prompt = f"{visual}，交易卡牌艺术风格，电影级光照，高清细节{bg_cn}"
         neg = None
     return {"prompt": prompt, "negative_prompt": neg}
-
-
-def _resolve_model(llm_cfg: dict) -> str:
-    provider = llm_cfg.get("provider", "anthropic")
-    _model_map = {
-        "anthropic": "claude-sonnet-4-6",
-        "moonshot":  "moonshot/moonshot-v1-8k",
-        "deepseek":  "deepseek/deepseek-chat",
-        "qwen":      "openai/qwen-plus",   # 通过 LiteLLM openai 兼容路由
-        "zhipu":     "zhipuai/glm-4-flash",
-    }
-    return _model_map.get(provider, "claude-sonnet-4-6")

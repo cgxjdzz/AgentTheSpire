@@ -7,7 +7,7 @@
 ## ⚡ 完整反编译源码（优先用这里，不要跑 ilspycmd）
 
 反编译目录路径由 `config.json` 的 `decompiled_src_path` 字段配置，已在你的 prompt 的 **API Lookup** 段注入。
-若该段显示"NOT available"，运行 `python scripts/decompile_sts2.py --game-path <STS2路径>` 生成。
+若该段显示"NOT available"，运行 `python tools/decompile_sts2.py --game-path <STS2路径>` 生成。
 
 常用子目录（在配置的反编译目录下）：
 ```
@@ -1252,3 +1252,4 @@ public class ArcanistPotionPool : CustomPotionPoolModel
 3. **Power 的应用方式**：不直接 `new` 并调用 `ApplyInternal`，应通过 `PowerCmd`（或 `CreatureCmd`）静态方法——具体方法名需查看 `MegaCrit.Sts2.Core.Commands/PowerCmd.cs`（或 BaseLib 中的等价物）。
 
 4. **异步设计**：几乎所有游戏效果方法都返回 `Task`，配合 `await` 使用以保证时序正确。
+

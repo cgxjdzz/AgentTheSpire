@@ -1,6 +1,8 @@
 @echo off
 chcp 65001 >nul
 title AgentTheSpire DEV
+set "SCRIPT_DIR=%~dp0"
+for %%I in ("%SCRIPT_DIR%..") do set "ROOT_DIR=%%~fI"
 
 :: 清理旧的 7860 进程
 for /f "tokens=5" %%a in ('netstat -ano 2^>nul ^| findstr ":7860 " ^| findstr "LISTENING"') do (
@@ -10,10 +12,10 @@ for /f "tokens=5" %%a in ('netstat -ano 2^>nul ^| findstr ":7860 " ^| findstr "L
 timeout /t 1 >nul
 
 :: 后端：uvicorn --reload 监听文件变化自动重启
-start "AgentTheSpire Backend [DEV]" cmd /k "cd /d "%~dp0backend" && call .venv\Scripts\activate.bat && uvicorn main:app --host 127.0.0.1 --port 7860 --reload"
+start "AgentTheSpire Backend [DEV]" cmd /k "cd /d "%ROOT_DIR%\backend" && call .venv\Scripts\activate.bat && uvicorn main:app --host 127.0.0.1 --port 7860 --reload"
 
 :: 前端：vite dev server，支持 HMR 热更新
-start "AgentTheSpire Frontend [DEV]" cmd /k "cd /d "%~dp0frontend" && npm run dev"
+start "AgentTheSpire Frontend [DEV]" cmd /k "cd /d "%ROOT_DIR%\frontend" && npm run dev"
 
 echo.
 echo [DEV 模式]

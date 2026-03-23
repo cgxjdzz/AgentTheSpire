@@ -1054,6 +1054,7 @@ Buffs: `StrengthPower`, `DexterityPower`, `ThornsPower`, `RegenPower`, `Artifact
 - Localization uses `{Damage}`, `{PoisonPower}` placeholders matching var names
 - `ExtraHoverTips` with `HoverTipFactory.FromPower<T>()` for power keyword tooltips on cards
 - Relic hooks need `ShouldReceiveCombatHooks => true`
+- Common hooks: `AfterCardPlayed`, `AfterDamageGiven`, `AfterPlayerTurnStart`
 - Cards need `[Pool(typeof(SomeCardPool))]` attribute
 - Card effect: `protected override async Task OnPlay(PlayerChoiceContext ctx, CardPlay cardPlay)`
 - NEVER `new XxxModel()` — use `ModelDb.Card<T>()` / `.ToMutable()`

@@ -3,9 +3,9 @@
 decompile_sts2.py — 将 sts2.dll 反编译到本地目录，供 AgentTheSpire code agent 使用。
 
 用法:
-    python scripts/decompile_sts2.py --game-path "C:/Steam/steamapps/common/Slay the Spire 2"
-    python scripts/decompile_sts2.py --dll-path "C:/path/to/sts2.dll"
-    python scripts/decompile_sts2.py --game-path "..." --output "E:/my_decompiled"
+    python tools/decompile_sts2.py --game-path "C:/Steam/steamapps/common/Slay the Spire 2"
+    python tools/decompile_sts2.py --dll-path "C:/path/to/sts2.dll"
+    python tools/decompile_sts2.py --game-path "..." --output "E:/my_decompiled"
 
 运行后将输出目录写入 config.json 的 decompiled_src_path 字段。
 
@@ -86,3 +86,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

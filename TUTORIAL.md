@@ -27,11 +27,11 @@
 
 **.NET 9 SDK**
 - 下载：https://dotnet.microsoft.com/download/dotnet/9.0
-- 或通过 `setup_mod_deps.bat` 自动安装（见第 2 步）
+- 或通过 `tools\setup_mod_deps.bat` 自动安装（见第 2 步）
 
 **Godot 4.5.1 Mono**
 - 必须是 **4.5.1** 版本，其他版本无法正确打包 .pck
-- 或通过 `setup_mod_deps.bat` 自动安装（见第 2 步）
+- 或通过 `tools\setup_mod_deps.bat` 自动安装（见第 2 步）
 
 ### 选择 LLM（二选一）
 
@@ -67,20 +67,20 @@ cd AgentTheSpire
 
 **第一步：安装 Python 依赖 + 构建前端**
 ```
-install.bat
+tools\install.bat
 ```
 完成后会提示是否安装本地 ComfyUI（12GB 磁盘），一般选 N 跳过。
 
 **第二步：安装 mod 编译工具**
 ```
-setup_mod_deps.bat
+tools\setup_mod_deps.bat
 ```
 自动完成：
 - 检测并安装 .NET 9 SDK（通过 winget）
 - 下载 Godot 4.5.1 Mono（~130MB）并解压到 `godot/` 目录
 - 将 Godot 路径写入 `config.json`
 
-> Linux/macOS 用户：使用 `install.sh` 和 `setup_mod_deps.sh`
+> Linux/macOS 用户：使用 `./tools/install.sh` 和 `./tools/setup_mod_deps.sh`
 
 ---
 
@@ -150,7 +150,7 @@ cp config.example.json config.json
 
 **启动**
 ```
-start.bat
+tools\start.bat
 ```
 浏览器自动打开 `http://localhost:7860`。
 
@@ -218,7 +218,7 @@ start.bat
 反编译游戏 DLL 后，AI 可以直接查阅原始实现，显著减少错误。
 
 ```bash
-python scripts/decompile_sts2.py --game-path "C:/Steam/steamapps/common/Slay the Spire 2"
+python tools/decompile_sts2.py --game-path "C:/Steam/steamapps/common/Slay the Spire 2"
 ```
 
 完成后会在仓库外自动创建 `sts2_decompiled/` 目录（22MB，版权内容，不进 git），
@@ -234,7 +234,7 @@ dotnet tool install -g ilspycmd
 ## 7. 常见问题
 
 **Q：编译报错 `Pack created with a newer version of the engine`**
-A：Godot 版本必须是 **4.5.1**，不能用 4.5.2 或其他版本。重新运行 `setup_mod_deps.bat`。
+A：Godot 版本必须是 **4.5.1**，不能用 4.5.2 或其他版本。重新运行 `tools\setup_mod_deps.bat`。
 
 **Q：游戏不加载 mod**
 A：mods 目录下需要同时存在 `.dll` 和 `.pck`，缺一不可。检查 `<sts2_path>/mods/<ModName>/` 目录。
@@ -256,3 +256,10 @@ A：
 
 **Q：`dotnet publish` 报错 DLL 被锁定**
 A：游戏运行时 DLL 会被占用。先退出游戏，再重新部署。
+
+
+
+
+
+
+
