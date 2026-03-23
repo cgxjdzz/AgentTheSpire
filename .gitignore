@@ -25,10 +25,12 @@ tools/sandbox_test.wsb
 
 # Install log
 install.log
+install-*.log
+
+# Generated local assets / outputs
+godot/
+docs/
 
 # OS
 .DS_Store
 Thumbs.db
-
-
-

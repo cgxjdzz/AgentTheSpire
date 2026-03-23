@@ -20,6 +20,7 @@ from project_utils import create_project_from_template
 from image.generator import generate_images
 from image.postprocess import PROFILES, process_image
 from image.prompt_adapter import adapt_prompt, ImageProvider
+from llm.stage_events import build_stage_event
 
 router = APIRouter()
 
@@ -41,6 +42,12 @@ def _img_provider_to_adapter(provider: str) -> ImageProvider:
 
 async def _send(ws: WebSocket, event: str, data: dict):
     await ws.send_text(json.dumps({"event": event, **data}))
+
+
+async def _send_stage(ws: WebSocket, scope: str, stage: str, message: str):
+    payload = build_stage_event(scope, stage, message)
+    if payload:
+        await _send(ws, "stage_update", payload)
 
 
 @router.websocket("/ws/create")
@@ -98,6 +105,7 @@ async def ws_create(ws: WebSocket):
         if not list(project_root.glob("*.csproj")):
             project_name = project_root.name
             parent_dir = project_root.parent
+            await _send_stage(ws, "project", "project_init", f"正在初始化项目 {project_name}...")
             await _send(ws, "progress", {"message": f"正在从本地模板初始化项目 {project_name}..."})
             try:
                 project_root = await asyncio.get_event_loop().run_in_executor(
@@ -111,6 +119,7 @@ async def ws_create(ws: WebSocket):
             await _send(ws, "progress", {"message": f"项目初始化完成: {project_root}"})
 
         # 2. Prompt Adaptation
+        await _send_stage(ws, "text", "prompt_adapting", "正在整理图像提示词...")
         await _send(ws, "progress", {"message": "正在生成图像提示词..."})
         adapted = await adapt_prompt(
             description,
@@ -141,6 +150,7 @@ async def ws_create(ws: WebSocket):
 
         while True:
             idx = len(all_images)
+            await _send_stage(ws, "image", "image_generating", f"正在生成第 {idx + 1} 张图像...")
             await _send(ws, "progress", {"message": f"正在生成第 {idx + 1} 张图像…"})
 
             async def _img_progress(msg: str):
@@ -169,11 +179,13 @@ async def ws_create(ws: WebSocket):
                 # 继续循环生成下一张
 
         # 5. 后处理
+        await _send_stage(ws, "image", "postprocess", "正在处理图像资产...")
         await _send(ws, "progress", {"message": "正在处理图像资产..."})
         image_paths = await _run_postprocess(selected_img, asset_type, asset_name, project_root)
         await _send(ws, "progress", {"message": f"图像资产已写入: {[str(p) for p in image_paths]}"})
 
         # 6. Code Agent
+        await _send_stage(ws, "agent", "agent_running", "正在生成代码...")
         await _send(ws, "progress", {"message": "Code Agent 开始生成代码..."})
 
         async def stream_to_ws(chunk: str):
@@ -213,6 +225,7 @@ async def _ws_run_custom_code(ws: WebSocket, params: dict, project_root: Path):
     if not list(project_root.glob("*.csproj")):
         project_name = project_root.name
         parent_dir = project_root.parent
+        await _send_stage(ws, "project", "project_init", f"正在初始化项目 {project_name}...")
         await _send(ws, "progress", {"message": f"正在从本地模板初始化项目 {project_name}..."})
         try:
             project_root = await asyncio.get_event_loop().run_in_executor(
@@ -224,6 +237,7 @@ async def _ws_run_custom_code(ws: WebSocket, params: dict, project_root: Path):
             project_root = await create_mod_project(project_name, parent_dir, _stream_init)
         await _send(ws, "progress", {"message": f"项目初始化完成: {project_root}"})
 
+    await _send_stage(ws, "agent", "agent_running", "正在生成自定义代码...")
     await _send(ws, "progress", {"message": "Code Agent 开始生成自定义代码..."})
 
     async def stream_to_ws(chunk: str):
@@ -270,6 +284,7 @@ async def _ws_run_with_provided_image(ws: WebSocket, params: dict, project_root:
     if not list(project_root.glob("*.csproj")):
         project_name = project_root.name
         parent_dir = project_root.parent
+        await _send_stage(ws, "project", "project_init", f"正在初始化项目 {project_name}...")
         await _send(ws, "progress", {"message": f"正在从本地模板初始化项目 {project_name}..."})
         try:
             project_root = await asyncio.get_event_loop().run_in_executor(
@@ -286,10 +301,12 @@ async def _ws_run_with_provided_image(ws: WebSocket, params: dict, project_root:
         None, lambda: img_src.convert("RGBA")
     )
 
+    await _send_stage(ws, "image", "postprocess", "正在处理图像资产...")
     await _send(ws, "progress", {"message": "正在处理图像资产..."})
     image_paths = await _run_postprocess(img, asset_type, asset_name, project_root)
     await _send(ws, "progress", {"message": f"图像资产已写入: {[str(p) for p in image_paths]}"})
 
+    await _send_stage(ws, "agent", "agent_running", "正在生成代码...")
     await _send(ws, "progress", {"message": "Code Agent 开始生成代码..."})
 
     async def stream_to_ws(chunk: str):

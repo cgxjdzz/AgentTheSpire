@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import { BatchSocket, PlanItem, ModPlan } from "../lib/batch_ws";
 import { AgentLog } from "../components/AgentLog";
+import { StageStatus } from "../components/StageStatus";
 import { BuildDeploy } from "../components/BuildDeploy";
 import { cn } from "../lib/utils";
 
@@ -23,6 +24,8 @@ type ItemStatus =
 
 interface ItemState {
   status: ItemStatus;
+  currentStage: string | null;
+  stageHistory: string[];
   progress: string[];
   images: string[];
   agentLog: string[];
@@ -35,6 +38,8 @@ interface ItemState {
 function defaultItemState(): ItemState {
   return {
     status: "pending",
+    currentStage: null,
+    stageHistory: [],
     progress: [],
     images: [],
     agentLog: [],
@@ -96,6 +101,8 @@ export default function BatchMode() {
   const [activeItemId, setActiveItemId] = useState<string | null>(null);
   const [itemStates, setItemStates] = useState<Record<string, ItemState>>({});
   const [batchLog, setBatchLog] = useState<string[]>([]);
+  const [currentBatchStage, setCurrentBatchStage] = useState<string | null>(null);
+  const [batchStageHistory, setBatchStageHistory] = useState<string[]>([]);
   const [globalError, setGlobalError] = useState<string | null>(null);
   const [batchResult, setBatchResult] = useState<{ success: number; error: number } | null>(null);
 
@@ -147,6 +154,8 @@ export default function BatchMode() {
     setGlobalError(null);
     setItemStates({});
     setBatchResult(null);
+    setCurrentBatchStage(null);
+    setBatchStageHistory([]);
     setPlan(null);
     setActiveItemId(null);
 
@@ -170,6 +179,24 @@ export default function BatchMode() {
       } catch {}
     });
     ws.on("batch_progress", (d) => setBatchLog(l => [...l, d.message]));
+    ws.on("stage_update", (d) => {
+      if (d.item_id) {
+        setItemStates(prev => {
+          const cur = prev[d.item_id!] ?? defaultItemState();
+          return {
+            ...prev,
+            [d.item_id!]: {
+              ...cur,
+              currentStage: d.message,
+              stageHistory: cur.stageHistory[cur.stageHistory.length - 1] === d.message ? cur.stageHistory : [...cur.stageHistory, d.message],
+            },
+          };
+        });
+        return;
+      }
+      setCurrentBatchStage(d.message);
+      setBatchStageHistory(prev => prev[prev.length - 1] === d.message ? prev : [...prev, d.message]);
+    });
     ws.on("batch_started", (d) => {
       const init: Record<string, ItemState> = {};
       d.items.forEach(it => { init[it.id] = defaultItemState(); });
@@ -374,6 +401,8 @@ export default function BatchMode() {
           activeItemId={activeItemId}
           setActiveItemId={setActiveItemId}
           batchLog={batchLog}
+          currentBatchStage={currentBatchStage}
+          batchStageHistory={batchStageHistory}
           batchResult={batchResult}
           stage={stage}
           projectRoot={projectRoot}
@@ -577,7 +606,7 @@ function ReviewPlan({
 
 function ExecutionView({
   items, itemStates, activeItemId, setActiveItemId,
-  batchLog, batchResult, stage, projectRoot,
+  batchLog, currentBatchStage, batchStageHistory, batchResult, stage, projectRoot,
   autoSelectFirst, onAutoSelectToggle,
   onSelectImage, onGenerateMore, onRetryItem, onUpdatePrompt, onToggleMorePrompt, onReset,
 }: {
@@ -586,6 +615,8 @@ function ExecutionView({
   activeItemId: string | null;
   setActiveItemId: (id: string) => void;
   batchLog: string[];
+  currentBatchStage: string | null;
+  batchStageHistory: string[];
   batchResult: { success: number; error: number } | null;
   stage: "executing" | "done";
   projectRoot: string;
@@ -658,8 +689,9 @@ function ExecutionView({
         })}
 
         {/* 全局进度日志（折叠） */}
-        {batchLog.length > 0 && stage === "executing" && (
+        {(batchLog.length > 0 || currentBatchStage) && stage === "executing" && (
           <div className="mt-2 pt-2 border-t border-slate-100">
+            <StageStatus current={currentBatchStage} history={batchStageHistory} />
             <div className="max-h-28 overflow-y-auto space-y-0.5">
               {batchLog.slice(-8).map((line, i) => (
                 <p key={i} className="text-xs text-slate-400 font-mono leading-relaxed truncate">{line}</p>
@@ -750,6 +782,7 @@ function ItemDetailPanel({
       </div>
 
       {/* 进度日志 */}
+      <StageStatus current={state.currentStage} history={state.stageHistory} isComplete={state.status === "done"} />
       {state.progress.length > 0 && (
         <AgentLog lines={state.progress} />
       )}

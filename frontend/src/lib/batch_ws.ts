@@ -5,6 +5,7 @@
 export type BatchEvent =
   | { event: "planning" }
   | { event: "plan_ready"; plan: ModPlan }
+  | { event: "stage_update"; scope: "project" | "text" | "image" | "agent" | "build"; stage: string; message: string; item_id?: string }
   | { event: "batch_progress"; message: string }
   | { event: "batch_started"; items: PlanItem[] }
   | { event: "item_started";      item_id: string; name: string; type: string }

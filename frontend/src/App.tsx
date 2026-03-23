@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { Swords, Settings, RotateCcw, ChevronDown, ChevronUp, Loader2, AlertTriangle } from "lucide-react";
 import { AgentLog } from "./components/AgentLog";
+import { StageStatus } from "./components/StageStatus";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { BuildDeploy } from "./components/BuildDeploy";
 import { WorkflowSocket } from "./lib/ws";
@@ -77,6 +78,10 @@ export default function App() {
 
   const [genLog, setGenLog] = useState<string[]>([]);
   const [agentLog, setAgentLog] = useState<string[]>([]);
+  const [flowStageCurrent, setFlowStageCurrent] = useState<string | null>(null);
+  const [flowStageHistory, setFlowStageHistory] = useState<string[]>([]);
+  const [agentStageCurrent, setAgentStageCurrent] = useState<string | null>(null);
+  const [agentStageHistory, setAgentStageHistory] = useState<string[]>([]);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [errorTrace, setErrorTrace] = useState<string | null>(null);
   const [socket, setSocket] = useState<WorkflowSocket | null>(null);
@@ -100,6 +105,15 @@ export default function App() {
 
   const appendGen   = useCallback((m: string) => setGenLog(p => [...p, m]), []);
   const appendAgent = useCallback((m: string) => setAgentLog(p => [...p, m]), []);
+  const pushStage = useCallback((scope: string, message: string) => {
+    if (scope === "agent") {
+      setAgentStageCurrent(message);
+      setAgentStageHistory(prev => prev[prev.length - 1] === message ? prev : [...prev, message]);
+      return;
+    }
+    setFlowStageCurrent(message);
+    setFlowStageHistory(prev => prev[prev.length - 1] === message ? prev : [...prev, message]);
+  }, []);
 
   const step = si(stage);
 
@@ -107,6 +121,10 @@ export default function App() {
     if (!assetName.trim() || !description.trim() || !projectRoot.trim()) return;
     setGenLog([]);
     setAgentLog([]);
+    setFlowStageCurrent(null);
+    setFlowStageHistory([]);
+    setAgentStageCurrent(null);
+    setAgentStageHistory([]);
     setImages([]);
     setPendingSlots(0);
     batchOffsetRef.current = 0;
@@ -122,6 +140,7 @@ export default function App() {
 
     const ws = new WorkflowSocket();
     setSocket(ws);
+    ws.on("stage_update",   (d: any) => pushStage(d.scope, d.message));
     ws.on("progress",       (d: any) => appendGen(`${d.message}`));
     ws.on("agent_stream",   (d: any) => appendAgent(d.chunk));
     ws.on("error",          (d: any) => { setErrorMsg(d.message); setErrorTrace(d.traceback || null); updateStage("error"); });
@@ -212,6 +231,10 @@ export default function App() {
     batchOffsetRef.current = 0;
     setGenLog([]);
     setAgentLog([]);
+    setFlowStageCurrent(null);
+    setFlowStageHistory([]);
+    setAgentStageCurrent(null);
+    setAgentStageHistory([]);
     setPromptPreview("");
     setNegativePrompt("");
     setPromptFallbackWarn(null);
@@ -527,6 +550,7 @@ export default function App() {
             {/* 生成中 */}
             {step === 2 && !errorInStep2 && (
               <div className="space-y-3">
+                <StageStatus current={flowStageCurrent} history={flowStageHistory} />
                 {genLog.length > 0
                   ? <AgentLog lines={genLog} />
                   : (
@@ -547,6 +571,7 @@ export default function App() {
             {/* 图片画廊 */}
             {step === 3 && (
               <div className="space-y-4">
+                <StageStatus current={flowStageCurrent} history={flowStageHistory} />
                 {genLog.length > 0 && <AgentLog lines={genLog} />}
 
                 <div className="flex flex-wrap gap-3">
@@ -615,7 +640,19 @@ export default function App() {
 
           {/* Step 3: Code Agent */}
           <Step num={3} title="Code Agent" active={step === 4 || errorInStep3} done={step === 5 && !errorInStep3}>
-            {step >= 4 && !errorInStep3 && <AgentLog lines={agentLog} />}
+            {step >= 4 && !errorInStep3 && (
+              <div className="space-y-3">
+                <StageStatus current={agentStageCurrent} history={agentStageHistory} isComplete={stage === "done"} />
+                {agentLog.length > 0 ? (
+                  <AgentLog lines={agentLog} />
+                ) : (
+                  <div className="flex items-center gap-2.5 py-3">
+                    <Loader2 size={16} className="text-amber-500 animate-spin" />
+                    <span className="text-sm text-slate-400">Code Agent 执行中…</span>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Code Agent 阶段的错误：内联显示完整错误 + 之前的 agent 日志 */}
             {errorInStep3 && (

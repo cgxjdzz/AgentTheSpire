@@ -20,6 +20,7 @@ DEFAULT_LLM_CONFIG = {
     "model": "",
     "api_key": "",
     "base_url": "",                  # 留空则使用各 provider 默认值
+    "custom_prompt": "",             # 追加到全部 AI 调用的全局提示词
 }
 
 DEFAULT_CONFIG = {

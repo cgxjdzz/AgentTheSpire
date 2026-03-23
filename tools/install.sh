@@ -33,6 +33,28 @@ echo "[1/3] 安装后端 Python 依赖..."
 cd "$ROOT_DIR/backend"
 python3 -m pip install -r requirements.txt
 
+echo ""
+echo "[1/3] 预下载 rembg 模型..."
+if ROOT_DIR="$ROOT_DIR" python3 - <<'PY'
+import json
+import os
+from pathlib import Path
+from rembg import new_session
+
+root = Path(os.environ["ROOT_DIR"])
+cfg_path = root / "config.json"
+cfg = json.loads(cfg_path.read_text(encoding="utf-8")) if cfg_path.exists() else {}
+model = cfg.get("image_gen", {}).get("rembg_model", "birefnet-general")
+print(f"[INFO] rembg model: {model}")
+new_session(model)
+print("[OK] rembg model ready")
+PY
+then
+    echo "[OK] rembg 模型已就绪"
+else
+    echo "[WARN] rembg 模型预下载失败，首次抠图时会自动下载"
+fi
+
 # 前端依赖
 echo ""
 echo "[2/3] 安装前端 Node.js 依赖..."
@@ -69,3 +91,4 @@ echo ""
 echo " =============================="
 echo "   安装完成！运行 ./tools/start.sh 启动"
 echo " =============================="
+echo ""

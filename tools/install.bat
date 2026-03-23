@@ -119,6 +119,18 @@ if errorlevel 1 (
 )
 echo [OK] 后端依赖安装完成
 call :log_info "后端依赖安装完成"
+
+echo [1/3] 预下载 rembg 模型...
+call :show_progress 65 "预下载 rembg 模型"
+call :log_info "开始预热 rembg 模型缓存"
+python -c "import json,pathlib; from rembg import new_session; root=pathlib.Path(r'%ROOT_DIR%'); cfg_path=root/'config.json'; cfg=json.loads(cfg_path.read_text(encoding='utf-8')) if cfg_path.exists() else {}; model=cfg.get('image_gen',{}).get('rembg_model','birefnet-general'); print(f'[INFO] rembg model: {model}'); new_session(model); print('[OK] rembg model ready')"
+if errorlevel 1 (
+    echo [WARN] rembg 模型预下载失败，首次抠图时会自动下载
+    call :log_info "rembg 模型预下载失败，改为运行时下载"
+) else (
+    echo [OK] rembg 模型已就绪
+    call :log_info "rembg 模型预下载完成"
+)
 call .venv\Scripts\deactivate.bat
 
 :: ── 2/3 前端依赖 ─────────────────────────────────────────────────────────────

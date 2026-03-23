@@ -244,6 +244,15 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                 <Field label="Base URL（可选）">
                   <input value={cfg.llm?.base_url || ""} onChange={e => set(["llm", "base_url"], e.target.value)} placeholder="https://..." className={inputCls} />
                 </Field>
+                <Field label="AI 附加提示词" hint="会追加到全部 AI 调用，包括文本分析、规划、提示词优化和代码代理">
+                  <textarea
+                    value={cfg.llm?.custom_prompt || ""}
+                    onChange={e => set(["llm", "custom_prompt"], e.target.value)}
+                    placeholder="例如：始终用简体中文回答；优先最小改动；输出先给结论后给细节"
+                    rows={5}
+                    className={inputCls + " min-h-28 resize-y"}
+                  />
+                </Field>
               </SGroup>
 
               <div className="border-t border-slate-100" />

@@ -9,6 +9,15 @@ import threading
 from pathlib import Path
 
 
+def _decode_output(raw: bytes) -> str:
+    for encoding in ("utf-8", "gbk", "cp936"):
+        try:
+            return raw.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    return raw.decode("utf-8", errors="replace")
+
+
 async def run(prompt: str, project_root: Path, llm_cfg: dict, stream_callback=None) -> str:
     env = os.environ.copy()
     if llm_cfg.get("api_key"):
@@ -32,10 +41,10 @@ async def run(prompt: str, project_root: Path, llm_cfg: dict, stream_callback=No
         "--skip-git-repo-check",
         "-C", str(project_root),
         "-o", str(output_file),
+        "-",
     ]
     if model:
         cmd.extend(["-m", model])
-    cmd.append(prompt)
 
     loop = asyncio.get_event_loop()
     line_queue: asyncio.Queue = asyncio.Queue()
@@ -44,6 +53,7 @@ async def run(prompt: str, project_root: Path, llm_cfg: dict, stream_callback=No
         try:
             proc = subprocess.Popen(
                 cmd,
+                stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 cwd=str(project_root),
@@ -55,10 +65,14 @@ async def run(prompt: str, project_root: Path, llm_cfg: dict, stream_callback=No
 
         assert proc.stdout is not None
         assert proc.stderr is not None
+        assert proc.stdin is not None
+
+        proc.stdin.write(prompt.encode("utf-8", errors="replace"))
+        proc.stdin.close()
 
         def _pump(pipe, tag):
             for raw_line in pipe:
-                decoded = raw_line.decode("utf-8", errors="replace")
+                decoded = _decode_output(raw_line)
                 if decoded:
                     loop.call_soon_threadsafe(line_queue.put_nowait, (tag, decoded))
 

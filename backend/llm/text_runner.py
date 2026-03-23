@@ -9,7 +9,8 @@ from typing import Awaitable, Callable, Optional
 
 import litellm
 
-from config import normalize_llm_config
+from config import get_config, normalize_llm_config
+from llm.prompt_builder import append_global_ai_instructions
 
 _MODEL_MAP = {
     "anthropic": "claude-sonnet-4-6",
@@ -19,6 +20,15 @@ _MODEL_MAP = {
     "qwen": "openai/qwen-plus",
     "zhipu": "zhipuai/glm-4-flash",
 }
+
+
+def _decode_output(raw: bytes) -> str:
+    for encoding in ("utf-8", "gbk", "cp936"):
+        try:
+            return raw.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    return raw.decode("utf-8", errors="replace")
 
 
 def resolve_model(llm_cfg: dict) -> str:
@@ -36,11 +46,29 @@ def resolve_text_backend(llm_cfg: dict) -> str:
     return "litellm"
 
 
+def _with_latest_runtime_custom_prompt(llm_cfg: dict) -> dict:
+    runtime_llm_cfg = normalize_llm_config(get_config().get("llm"))
+    merged = normalize_llm_config(llm_cfg)
+    merged["custom_prompt"] = runtime_llm_cfg.get("custom_prompt", "")
+    return merged
+
+
+def build_text_prompt(prompt: str, llm_cfg: dict, use_runtime_config: bool = False) -> str:
+    effective_cfg = _with_latest_runtime_custom_prompt(llm_cfg) if use_runtime_config else llm_cfg
+    return append_global_ai_instructions(prompt, effective_cfg)
+
+
+def build_system_prompt(system_prompt: str, llm_cfg: dict, use_runtime_config: bool = False) -> str:
+    effective_cfg = _with_latest_runtime_custom_prompt(llm_cfg) if use_runtime_config else llm_cfg
+    return append_global_ai_instructions(system_prompt, effective_cfg)
+
+
 async def complete_text(
     prompt: str,
     llm_cfg: dict,
     cwd: Optional[Path] = None,
 ) -> str:
+    prompt = build_text_prompt(prompt, llm_cfg, use_runtime_config=True)
     backend = resolve_text_backend(llm_cfg)
     if backend == "litellm":
         return await _complete_via_litellm(prompt, llm_cfg)
@@ -57,10 +85,15 @@ async def stream_text(
     cwd: Optional[Path] = None,
 ) -> str:
     backend = resolve_text_backend(llm_cfg)
+    system_prompt = build_system_prompt(system_prompt, llm_cfg, use_runtime_config=True)
     if backend == "litellm":
         return await _stream_via_litellm(system_prompt, user_prompt, llm_cfg, on_chunk)
 
-    full_text = await complete_text(f"{system_prompt}\n\n{user_prompt}", llm_cfg, cwd)
+    full_prompt = f"{system_prompt}\n\n{user_prompt}"
+    if backend == "codex_cli":
+        full_text = await _complete_via_codex_cli(full_prompt, llm_cfg, cwd)
+    else:
+        full_text = await _complete_via_claude_cli(full_prompt, cwd)
     chunk_size = 80
     for i in range(0, len(full_text), chunk_size):
         await on_chunk(full_text[i:i + chunk_size])
@@ -96,7 +129,7 @@ async def _complete_via_codex_cli(prompt: str, llm_cfg: dict, cwd: Optional[Path
         "--full-auto",
         "--color", "never",
         "--skip-git-repo-check",
-        prompt,
+        "-",
     ]
     if cwd:
         cmd[2:2] = ["-C", str(cwd)]
@@ -110,6 +143,7 @@ async def _complete_via_codex_cli(prompt: str, llm_cfg: dict, cwd: Optional[Path
             None,
             lambda: subprocess.run(
                 cmd,
+                input=prompt.encode("utf-8", errors="replace"),
                 capture_output=True,
                 timeout=180,
                 cwd=str(cwd) if cwd else None,
@@ -118,9 +152,9 @@ async def _complete_via_codex_cli(prompt: str, llm_cfg: dict, cwd: Optional[Path
         timeout=185,
     )
     if result.returncode != 0:
-        detail = result.stderr.decode("utf-8", errors="replace").strip()
+        detail = _decode_output(result.stderr).strip()
         raise RuntimeError(f"Codex CLI 退出码 {result.returncode}\n{detail}")
-    return result.stdout.decode("utf-8", errors="replace").strip()
+    return _decode_output(result.stdout).strip()
 
 
 async def _complete_via_litellm(prompt: str, llm_cfg: dict) -> str:

@@ -27,6 +27,7 @@ from config import get_config
 from image.generator import generate_images
 from image.postprocess import process_image
 from image.prompt_adapter import adapt_prompt, ImageProvider
+from llm.stage_events import build_stage_event
 
 router = APIRouter()
 
@@ -89,6 +90,11 @@ async def ws_batch(ws: WebSocket):
     async def send(event: str, **data):
         await ws.send_text(json.dumps({"event": event, **data}))
 
+    async def send_stage(scope: str, stage: str, message: str, item_id: str | None = None):
+        payload = build_stage_event(scope, stage, message, item_id=item_id)
+        if payload:
+            await send("stage_update", **payload)
+
     try:
         # ── 1. 接收启动参数 ──────────────────────────────────────────────────
         raw = await ws.receive_text()
@@ -107,6 +113,7 @@ async def ws_batch(ws: WebSocket):
             requirements: str = params["requirements"]
 
             # ── 2. 规划 ──────────────────────────────────────────────────────
+            await send_stage("text", "planning", "正在规划 Mod...")
             await send("planning")
             plan = await plan_mod(requirements)
             await send("plan_ready", plan=plan.to_dict())
@@ -129,6 +136,7 @@ async def ws_batch(ws: WebSocket):
         if not list(project_root.glob("*.csproj")):
             project_name = project_root.name
             parent_dir = project_root.parent
+            await send_stage("project", "project_init", f"正在初始化项目 {project_name}...")
             await send("batch_progress", message=f"未检测到项目，正在创建 {project_name}...")
 
             async def _init_stream(chunk: str):
@@ -165,6 +173,7 @@ async def ws_batch(ws: WebSocket):
                     else:
                         img_desc = item.image_description or item.description
                         async with image_gen_sem:
+                            await send_stage("text", "prompt_adapting", "正在整理图像提示词...", item.id)
                             await send("item_progress", item_id=item.id, message="正在优化图像提示词...")
                             adapted = await adapt_prompt(
                                 img_desc, item.type, img_provider,
@@ -176,6 +185,7 @@ async def ws_batch(ws: WebSocket):
                         while True:
                             async with image_gen_sem:
                                 idx = len(all_images)
+                                await send_stage("image", "image_generating", f"正在生成第 {idx + 1} 张图像...", item.id)
                                 await send("item_progress", item_id=item.id, message=f"正在生成第 {idx + 1} 张图像...")
                                 async def _img_progress(msg: str, _id=item.id):
                                     await send("item_progress", item_id=_id, message=msg)
@@ -208,6 +218,7 @@ async def ws_batch(ws: WebSocket):
                             if result.get("negative_prompt") is not None:
                                 current_neg = result["negative_prompt"]
 
+                    await send_stage("image", "postprocess", "正在处理图像资产...", item.id)
                     await send("item_progress", item_id=item.id, message="正在处理图像资产...")
                     paths = await _run_postprocess(selected_img, item.type, item.name, project_root)
                     item_image_paths[item.id] = paths
@@ -246,6 +257,7 @@ async def ws_batch(ws: WebSocket):
                 # 向所有 item 发送代码生成开始的通知
                 first_id = group[0].id
                 for item in group:
+                    await send_stage("agent", "agent_running", "正在生成代码...", item.id)
                     await send("item_progress", item_id=item.id, message="Code Agent 开始生成代码...")
 
                 async def _stream(chunk: str):
@@ -339,6 +351,7 @@ async def ws_batch(ws: WebSocket):
 
         # ── 最终统一编译（所有资产代码写完后只编译一次）────────────────────────
         if len(error_ids) < len(sorted_items):
+            await send_stage("build", "build_running", "正在统一编译与部署...")
             await send("batch_progress", message="所有资产代码生成完毕，开始统一编译...")
             async def _build_stream(chunk: str):
                 await send("batch_progress", message=chunk)

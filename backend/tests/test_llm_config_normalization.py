@@ -29,3 +29,8 @@ def test_normalize_frontend_api_payload():
     llm_cfg = normalize_llm_config({"mode": "api", "provider": "openai"})
     assert llm_cfg["mode"] == "api"
     assert llm_cfg["provider"] == "openai"
+
+
+def test_normalize_llm_config_sets_default_custom_prompt():
+    llm_cfg = normalize_llm_config({})
+    assert llm_cfg["custom_prompt"] == ""

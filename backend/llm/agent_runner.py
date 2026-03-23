@@ -4,6 +4,7 @@ from pathlib import Path
 
 from config import get_config, normalize_llm_config
 from llm.agent_backends import run_claude_cli, run_codex_cli
+from llm.prompt_builder import append_global_ai_instructions
 
 
 def resolve_agent_backend(llm_cfg: dict) -> str:
@@ -11,9 +12,22 @@ def resolve_agent_backend(llm_cfg: dict) -> str:
     return cfg.get("agent_backend", "claude")
 
 
+def _with_latest_runtime_custom_prompt(llm_cfg: dict) -> dict:
+    runtime_llm_cfg = normalize_llm_config(get_config().get("llm"))
+    merged = normalize_llm_config(llm_cfg)
+    merged["custom_prompt"] = runtime_llm_cfg.get("custom_prompt", "")
+    return merged
+
+
+def build_agent_prompt(prompt: str, llm_cfg: dict, use_runtime_config: bool = False) -> str:
+    effective_cfg = _with_latest_runtime_custom_prompt(llm_cfg) if use_runtime_config else llm_cfg
+    return append_global_ai_instructions(prompt, effective_cfg)
+
+
 async def run_agent_task(prompt: str, project_root: Path, stream_callback=None) -> str:
     llm_cfg = get_config()["llm"]
     backend = resolve_agent_backend(llm_cfg)
+    prompt = build_agent_prompt(prompt, llm_cfg, use_runtime_config=True)
 
     if backend == "codex":
         return await run_codex_cli(prompt, project_root, llm_cfg, stream_callback)

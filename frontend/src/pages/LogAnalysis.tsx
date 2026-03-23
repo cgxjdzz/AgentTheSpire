@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { Loader2, Bug, RotateCcw } from "lucide-react";
 import { AgentLog } from "../components/AgentLog";
+import { StageStatus } from "../components/StageStatus";
 
 type Stage = "input" | "analyzing" | "done" | "error";
 
@@ -9,6 +10,8 @@ export default function LogAnalysis() {
   const [context, setContext] = useState("");
   const [logLines, setLogLines] = useState<number | null>(null);
   const [chunks, setChunks] = useState<string[]>([]);
+  const [currentStage, setCurrentStage] = useState<string | null>(null);
+  const [stageHistory, setStageHistory] = useState<string[]>([]);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
 
@@ -18,6 +21,8 @@ export default function LogAnalysis() {
     setStage("input");
     setLogLines(null);
     setChunks([]);
+    setCurrentStage(null);
+    setStageHistory([]);
     setErrorMsg(null);
   }
 
@@ -25,6 +30,8 @@ export default function LogAnalysis() {
     setStage("analyzing");
     setLogLines(null);
     setChunks([]);
+    setCurrentStage(null);
+    setStageHistory([]);
     setErrorMsg(null);
 
     const ws = new WebSocket(`ws://${location.host}/api/ws/analyze-log`);
@@ -34,7 +41,10 @@ export default function LogAnalysis() {
 
     ws.onmessage = (e) => {
       const msg = JSON.parse(e.data);
-      if (msg.event === "log_info") {
+      if (msg.event === "stage_update") {
+        setCurrentStage(msg.message);
+        setStageHistory(prev => prev[prev.length - 1] === msg.message ? prev : [...prev, msg.message]);
+      } else if (msg.event === "log_info") {
         setLogLines(msg.lines);
       } else if (msg.event === "stream") {
         setChunks(prev => [...prev, msg.chunk]);
@@ -95,11 +105,14 @@ export default function LogAnalysis() {
             )}
           </div>
         ) : (
-          <div className="flex items-center gap-2 py-1">
-            <Loader2 size={14} className="text-amber-500 animate-spin" />
-            <span className="text-sm text-slate-400">
-              {logLines != null ? `已读取 ${logLines} 行日志，AI 分析中…` : "正在读取日志…"}
-            </span>
+          <div className="space-y-3">
+            <div className="flex items-center gap-2 py-1">
+              <Loader2 size={14} className="text-amber-500 animate-spin" />
+              <span className="text-sm text-slate-400">
+                {logLines != null ? `已读取 ${logLines} 行日志，AI 分析中…` : "正在读取日志…"}
+              </span>
+            </div>
+            <StageStatus current={currentStage} history={stageHistory} />
           </div>
         )}
       </div>

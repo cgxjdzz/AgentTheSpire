@@ -37,6 +37,14 @@ $checks = @(
         Name = 'uses configurable log file path'
         Pattern = 'INSTALL_LOG_FILE'
     }
+    @{
+        Name = 'prewarms rembg model cache'
+        Pattern = 'new_session(model)'
+    }
+    @{
+        Name = 'warns when rembg prewarm fails'
+        Pattern = '首次抠图时会自动下载'
+    }
 )
 
 $failed = @()
@@ -79,4 +87,3 @@ if ($loneLf -gt 0) {
 }
 
 Write-Host 'install.bat verification passed'
-

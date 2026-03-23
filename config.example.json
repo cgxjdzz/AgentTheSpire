@@ -5,7 +5,8 @@
     "provider": "anthropic",
     "model": "",
     "api_key": "",
-    "base_url": ""
+    "base_url": "",
+    "custom_prompt": ""
   },
   "image_gen": {
     "mode": "cloud",

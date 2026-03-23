@@ -3,6 +3,7 @@
  */
 
 export type WsEvent =
+  | { event: "stage_update";  scope: "project" | "text" | "image" | "agent" | "build"; stage: string; message: string }
   | { event: "progress";       message: string }
   | { event: "prompt_preview"; prompt: string; negative_prompt: string; fallback_warning?: string }
   | { event: "image_ready";    image: string; index: number; prompt: string }
