@@ -1,6 +1,7 @@
 import json
 import os
 import subprocess
+from copy import deepcopy
 from pathlib import Path
 from typing import Optional
 
@@ -21,10 +22,16 @@ DEFAULT_LLM_CONFIG = {
     "api_key": "",
     "base_url": "",                  # 留空则使用各 provider 默认值
     "custom_prompt": "",             # 追加到全部 AI 调用的全局提示词
+    "execution_mode": "legacy_direct",  # "legacy_direct" | "approval_first"
 }
 
 DEFAULT_CONFIG = {
     "llm": DEFAULT_LLM_CONFIG,
+    "approval": {
+        "auto_execute_low_risk": False,
+        "allowed_commands": [],
+        "allowed_roots": [],
+    },
     "image_gen": {
         "mode": "cloud",                # "cloud" | "local"
         "provider": "bfl",             # "bfl" | "fal" | "jimeng" | "wanxiang"
@@ -116,12 +123,12 @@ def save_config(config: dict) -> None:
 
 
 def _deep_merge(base: dict, override: dict) -> dict:
-    result = base.copy()
+    result = deepcopy(base)
     for k, v in override.items():
         if k in result and isinstance(result[k], dict) and isinstance(v, dict):
             result[k] = _deep_merge(result[k], v)
         else:
-            result[k] = v
+            result[k] = deepcopy(v)
     return result
 
 
