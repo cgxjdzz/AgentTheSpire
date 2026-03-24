@@ -27,6 +27,9 @@ tools/sandbox_test.wsb
 install.log
 install-*.log
 
+# Mod projects (generated locally, not tracked in this repo)
+FangedGrimoire/
+
 # Generated local assets / outputs
 godot/
 docs/
@@ -34,3 +37,9 @@ docs/
 # OS
 .DS_Store
 Thumbs.db
+
+# Claude Code local settings
+.claude/
+
+# Godot import metadata (auto-generated, not committed)
+**/*.import
