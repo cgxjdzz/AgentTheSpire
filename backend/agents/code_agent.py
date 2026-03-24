@@ -123,8 +123,8 @@ Steps to complete:
    - Cards MUST have [Pool(typeof(SomeCardPool))] attribute (e.g. ColorlessCardPool) — without it the game crashes on startup.
    - Do NOT create a Harmony patch to manually add cards to pools — BaseLib autoAdd handles this.
 4. Create BOTH localization files:
-   - `{asset_name}/localization/eng/<type>s.json` — English
-   - `{asset_name}/localization/zhs/<type>s.json` — Simplified Chinese
+   - `{project_root.name}/localization/eng/<type>s.json` — English
+   - `{project_root.name}/localization/zhs/<type>s.json` — Simplified Chinese
 5. Register it in MainFile.cs if needed (BaseLib handles most registration automatically).
 {build_step}
 

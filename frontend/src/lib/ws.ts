@@ -36,7 +36,34 @@ export class WorkflowSocket {
 
   waitOpen(): Promise<void> {
     if (this.ws.readyState === WebSocket.OPEN) return Promise.resolve();
-    return new Promise((res) => (this.ws.onopen = () => res()));
+    return new Promise((res, rej) => {
+      const cleanup = () => {
+        this.ws.onopen = null;
+        this.ws.onerror = null;
+        this.ws.onclose = null;
+      };
+
+      const timer = setTimeout(() => {
+        cleanup();
+        rej(new Error("WebSocket connection timed out"));
+      }, 5000);
+
+      this.ws.onopen = () => {
+        clearTimeout(timer);
+        cleanup();
+        res();
+      };
+      this.ws.onerror = () => {
+        clearTimeout(timer);
+        cleanup();
+        rej(new Error("WebSocket connection failed"));
+      };
+      this.ws.onclose = () => {
+        clearTimeout(timer);
+        cleanup();
+        rej(new Error("WebSocket connection closed"));
+      };
+    });
   }
 
   close() {

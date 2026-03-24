@@ -5,6 +5,7 @@ import {
   Upload, Wand2,
 } from "lucide-react";
 import { BatchSocket, PlanItem, ModPlan } from "../lib/batch_ws";
+import { pickActiveItemOnDone, pickActiveItemOnStart } from "../lib/batchActiveItem";
 import { AgentLog } from "../components/AgentLog";
 import { StageStatus } from "../components/StageStatus";
 import { BuildDeploy } from "../components/BuildDeploy";
@@ -100,6 +101,7 @@ export default function BatchMode() {
   });
   const [activeItemId, setActiveItemId] = useState<string | null>(null);
   const [itemStates, setItemStates] = useState<Record<string, ItemState>>({});
+  const itemStatesRef = useRef<Record<string, ItemState>>({});
   const [batchLog, setBatchLog] = useState<string[]>([]);
   const [currentBatchStage, setCurrentBatchStage] = useState<string | null>(null);
   const [batchStageHistory, setBatchStageHistory] = useState<string[]>([]);
@@ -113,29 +115,35 @@ export default function BatchMode() {
 
   // ── State updater helpers ─────────────────────────────────────────────────
 
+  const applyItemStates = useCallback((updater: (prev: Record<string, ItemState>) => Record<string, ItemState>) => {
+    const next = updater(itemStatesRef.current);
+    itemStatesRef.current = next;
+    setItemStates(next);
+  }, []);
+
   const updateItem = useCallback((id: string, patch: Partial<ItemState>) => {
-    setItemStates(prev => ({
+    applyItemStates(prev => ({
       ...prev,
       [id]: { ...(prev[id] ?? defaultItemState()), ...patch },
     }));
-  }, []);
+  }, [applyItemStates]);
 
   const appendProgress = useCallback((id: string, msg: string) => {
-    setItemStates(prev => {
+    applyItemStates(prev => {
       const cur = prev[id] ?? defaultItemState();
       return { ...prev, [id]: { ...cur, progress: [...cur.progress, msg] } };
     });
-  }, []);
+  }, [applyItemStates]);
 
   const appendAgent = useCallback((id: string, chunk: string) => {
-    setItemStates(prev => {
+    applyItemStates(prev => {
       const cur = prev[id] ?? defaultItemState();
       return { ...prev, [id]: { ...cur, agentLog: [...cur.agentLog, chunk] } };
     });
-  }, []);
+  }, [applyItemStates]);
 
   const addImage = useCallback((id: string, b64: string, index: number, prompt: string) => {
-    setItemStates(prev => {
+    applyItemStates(prev => {
       const cur = prev[id] ?? defaultItemState();
       const images = [...cur.images];
       images[index] = b64;
@@ -143,7 +151,7 @@ export default function BatchMode() {
     });
     // 如果当前没有 active item，自动跳到这个需要选图的 item
     setActiveItemId(prev => prev ?? id);
-  }, []);
+  }, [applyItemStates]);
 
   // ── Start ─────────────────────────────────────────────────────────────────
 
@@ -152,6 +160,7 @@ export default function BatchMode() {
     setStage("planning");
     setBatchLog([]);
     setGlobalError(null);
+    itemStatesRef.current = {};
     setItemStates({});
     setBatchResult(null);
     setCurrentBatchStage(null);
@@ -181,7 +190,7 @@ export default function BatchMode() {
     ws.on("batch_progress", (d) => setBatchLog(l => [...l, d.message]));
     ws.on("stage_update", (d) => {
       if (d.item_id) {
-        setItemStates(prev => {
+        applyItemStates(prev => {
           const cur = prev[d.item_id!] ?? defaultItemState();
           return {
             ...prev,
@@ -200,20 +209,14 @@ export default function BatchMode() {
     ws.on("batch_started", (d) => {
       const init: Record<string, ItemState> = {};
       d.items.forEach(it => { init[it.id] = defaultItemState(); });
+      itemStatesRef.current = init;
       setItemStates(init);
       setStage("executing");
       setActiveItemId(d.items[0]?.id ?? null);
     });
     ws.on("item_started", (d) => {
       updateItem(d.item_id, { status: "img_generating" });
-      // 自动切换到正在运行的资产，除非当前有资产等待用户选图
-      setActiveItemId(prev => {
-        if (!prev) return d.item_id;
-        const prevStatus = itemStates[prev]?.status;
-        if (prevStatus === "awaiting_selection") return prev; // 别打断选图
-        if (prevStatus === "done" || prevStatus === "error") return d.item_id;
-        return prev;
-      });
+      setActiveItemId(prev => pickActiveItemOnStart(prev, itemStatesRef.current, d.item_id));
     });
     ws.on("item_progress", (d) => {
       appendProgress(d.item_id, d.message);
@@ -231,14 +234,7 @@ export default function BatchMode() {
     ws.on("item_agent_stream", (d) => { appendAgent(d.item_id, d.chunk); });
     ws.on("item_done", (d) => {
       updateItem(d.item_id, { status: "done" });
-      setActiveItemId(prev => {
-        if (prev !== d.item_id) return prev;
-        // 当前正在看这个资产，切到下一个需要关注的
-        const next = Object.entries(itemStates).find(
-          ([id, s]) => id !== d.item_id && (s.status === "awaiting_selection" || s.status === "img_generating" || s.status === "code_generating")
-        );
-        return next ? next[0] : prev;
-      });
+      setActiveItemId(prev => pickActiveItemOnDone(prev, d.item_id, itemStatesRef.current));
     });
     ws.on("item_error", (d) => {
       updateItem(d.item_id, { status: "error", error: d.message, errorTrace: d.traceback ?? null });
@@ -274,7 +270,7 @@ export default function BatchMode() {
     socketRef.current.send({ action: "select_image", item_id: itemId, index });
     updateItem(itemId, { status: "code_generating" });
     const nextAwaiting = editedItems.find(
-      it => it.id !== itemId && itemStates[it.id]?.status === "awaiting_selection"
+      it => it.id !== itemId && itemStatesRef.current[it.id]?.status === "awaiting_selection"
     );
     if (nextAwaiting) setActiveItemId(nextAwaiting.id);
   }
@@ -287,7 +283,7 @@ export default function BatchMode() {
 
   function handleGenerateMore(itemId: string) {
     if (!socketRef.current) return;
-    const state = itemStates[itemId];
+    const state = itemStatesRef.current[itemId];
     socketRef.current.send({
       action: "generate_more",
       item_id: itemId,
@@ -302,6 +298,7 @@ export default function BatchMode() {
     setStage("input");
     setPlan(null);
     setEditedItems([]);
+    itemStatesRef.current = {};
     setItemStates({});
     setBatchLog([]);
     setGlobalError(null);
@@ -415,7 +412,7 @@ export default function BatchMode() {
             updateItem(id, { currentPrompt: prompt })
           }
           onToggleMorePrompt={(id) =>
-            setItemStates(prev => ({
+            applyItemStates(prev => ({
               ...prev,
               [id]: { ...prev[id], showMorePrompt: !prev[id]?.showMorePrompt },
             }))

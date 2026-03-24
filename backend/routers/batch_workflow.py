@@ -21,7 +21,13 @@ _log = logging.getLogger("batch")
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from agents.code_agent import create_asset, create_asset_group, create_custom_code, create_mod_project
+from agents.code_agent import (
+    build_and_fix,
+    create_asset,
+    create_asset_group,
+    create_custom_code,
+    create_mod_project,
+)
 from agents.planner import plan_mod, plan_from_dict, topological_sort, find_groups, PlanItem
 from config import get_config
 from image.generator import generate_images
@@ -145,9 +151,9 @@ async def ws_batch(ws: WebSocket):
             project_root = await create_mod_project(project_name, parent_dir, _init_stream)
             await send("batch_progress", message=f"项目创建完成: {project_root}")
 
-        group_info = {
-            item.id: (i, len(group))
-            for i, group in enumerate(groups)
+        group_by_item = {
+            item.id: group
+            for group in groups
             for item in group
         }
         if any(len(g) > 1 for g in groups):
@@ -302,6 +308,23 @@ async def ws_batch(ws: WebSocket):
                     for item in group:
                         item_done_events[item.id].set()
 
+        async def retry_group_for_item(item_id: str):
+            group = group_by_item[item_id]
+            retry_item = items_by_id[item_id]
+
+            for item in group:
+                error_ids.discard(item.id)
+                item_done_events[item.id] = asyncio.Event()
+
+            rerun_images = retry_item.needs_image and retry_item.id not in item_image_paths
+            if rerun_images:
+                item_image_events[retry_item.id] = asyncio.Event()
+                tasks.append(asyncio.create_task(process_item_images(retry_item)))
+            else:
+                item_image_events.setdefault(retry_item.id, asyncio.Event()).set()
+
+            tasks.append(asyncio.create_task(process_group_code(group)))
+
         # ── 6. 启动所有任务 ───────────────────────────────────────────────────
         items_by_id = {item.id: item for item in sorted_items}
         tasks = [asyncio.create_task(process_item_images(item)) for item in sorted_items]
@@ -332,13 +355,8 @@ async def ws_batch(ws: WebSocket):
 
                 elif action == "retry_item" and item_id in items_by_id:
                     # 重置状态，重新跑该 item
-                    error_ids.discard(item_id)
-                    item_done_events[item_id] = asyncio.Event()
                     pending.add(item_id)
-                    tasks.append(asyncio.create_task(process_item(items_by_id[item_id])))
-                    await send("item_started", item_id=item_id,
-                               name=items_by_id[item_id].name,
-                               type=items_by_id[item_id].type)
+                    await retry_group_for_item(item_id)
 
             except asyncio.TimeoutError:
                 pass
