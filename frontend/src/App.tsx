@@ -192,7 +192,13 @@ export default function App() {
       updateStage("done");
     });
 
-    await ws.waitOpen();
+    try {
+      await ws.waitOpen();
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : String(err));
+      updateStage("error");
+      return;
+    }
     if (imageMode === "upload" && uploadedImageB64) {
       updateStage("agent_running");
       ws.send({ action: "start", asset_type: assetType, asset_name: assetName, description, project_root: projectRoot, provided_image_b64: uploadedImageB64, provided_image_name: uploadedImageName });
@@ -683,6 +689,7 @@ export default function App() {
                     onApprove={(actionId) => { void handleApprovalAction(actionId, approveApproval); }}
                     onReject={(actionId) => { void handleApprovalAction(actionId, (id) => rejectApproval(id)); }}
                     onExecute={(actionId) => { void handleApprovalAction(actionId, executeApproval); }}
+                    onProceed={() => { socket?.send({ action: "approve_all" }); }}
                   />
                 ) : (
                   <>

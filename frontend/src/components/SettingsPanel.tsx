@@ -215,6 +215,19 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                     <option value="codex">Codex CLI</option>
                   </select>
                 </Field>
+                <Field
+                  label="代码执行模式"
+                  hint="审批模式：执行前展示操作预览，用户确认后再调用代理。推荐在使用 Codex 时开启。"
+                >
+                  <select
+                    value={cfg.llm?.execution_mode || "legacy_direct"}
+                    onChange={e => set(["llm", "execution_mode"], e.target.value)}
+                    className={selectCls}
+                  >
+                    <option value="legacy_direct">直接执行</option>
+                    <option value="approval_first">审批后执行</option>
+                  </select>
+                </Field>
                 {cfg.llm?.mode === "api" && (
                   <Field label="API 提供商">
                     <select

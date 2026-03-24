@@ -13,6 +13,7 @@ export function ApprovalPanel({
   onApprove,
   onReject,
   onExecute,
+  onProceed,
 }: {
   summary: string;
   requests: ApprovalRequest[];
@@ -20,6 +21,7 @@ export function ApprovalPanel({
   onApprove?: (actionId: string) => void;
   onReject?: (actionId: string) => void;
   onExecute?: (actionId: string) => void;
+  onProceed?: () => void;
 }) {
   return (
     <div className="space-y-3">
@@ -83,6 +85,15 @@ export function ApprovalPanel({
           );
         })}
       </div>
+
+      {onProceed && (
+        <button
+          onClick={onProceed}
+          className="w-full rounded-md bg-amber-500 px-3 py-2 text-sm font-medium text-white hover:bg-amber-600"
+        >
+          确认，开始生成代码
+        </button>
+      )}
     </div>
   );
 }

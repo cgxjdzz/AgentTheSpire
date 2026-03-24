@@ -17,6 +17,7 @@ export type WsEvent =
 export class WorkflowSocket {
   private ws: WebSocket;
   private listeners = new Map<string, ((data: WsEvent) => void)[]>();
+  private _intentionallyClosed = false;
 
   constructor() {
     this.ws = new WebSocket(`ws://${location.host}/api/ws/create`);
@@ -24,6 +25,24 @@ export class WorkflowSocket {
       const data: WsEvent = JSON.parse(e.data);
       const handlers = this.listeners.get(data.event) ?? [];
       handlers.forEach((h) => h(data));
+    };
+  }
+
+  private _fire(data: WsEvent) {
+    const handlers = this.listeners.get(data.event) ?? [];
+    handlers.forEach((h) => h(data));
+  }
+
+  private _setupPersistentHandlers() {
+    this.ws.onerror = () => {
+      if (this._intentionallyClosed) return;
+      this._fire({ event: "error", message: "WebSocket 连接出错，与后端的连接已中断" });
+    };
+    this.ws.onclose = (e: CloseEvent) => {
+      if (this._intentionallyClosed) return;
+      if (!e.wasClean) {
+        this._fire({ event: "error", message: `WebSocket 连接意外断开（code: ${e.code}），后端可能已崩溃或进程退出` });
+      }
     };
   }
 
@@ -38,7 +57,10 @@ export class WorkflowSocket {
   }
 
   waitOpen(): Promise<void> {
-    if (this.ws.readyState === WebSocket.OPEN) return Promise.resolve();
+    if (this.ws.readyState === WebSocket.OPEN) {
+      this._setupPersistentHandlers();
+      return Promise.resolve();
+    }
     return new Promise((res, rej) => {
       const cleanup = () => {
         this.ws.onopen = null;
@@ -54,6 +76,7 @@ export class WorkflowSocket {
       this.ws.onopen = () => {
         clearTimeout(timer);
         cleanup();
+        this._setupPersistentHandlers();
         res();
       };
       this.ws.onerror = () => {
@@ -70,6 +93,7 @@ export class WorkflowSocket {
   }
 
   close() {
+    this._intentionallyClosed = true;
     this.ws.close();
   }
 }
