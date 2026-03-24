@@ -1,3 +1,5 @@
+import type { ApprovalRequest } from "./approvals";
+
 /**
  * WebSocket client for the AgentTheSpire workflow.
  */
@@ -8,6 +10,7 @@ export type WsEvent =
   | { event: "prompt_preview"; prompt: string; negative_prompt: string; fallback_warning?: string }
   | { event: "image_ready";    image: string; index: number; prompt: string }
   | { event: "agent_stream";   chunk: string }
+  | { event: "approval_pending"; summary: string; requests: ApprovalRequest[] }
   | { event: "done";           success: boolean; image_paths: string[]; agent_output: string }
   | { event: "error";          message: string };
 

@@ -14,12 +14,15 @@ from typing import Literal
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from approval.action_prompt import build_action_prompt
+from approval.runtime import get_approval_service
 from agents.code_agent import create_asset, create_custom_code, build_and_fix, create_mod_project, package_mod
 from config import get_config
 from project_utils import create_project_from_template
 from image.generator import generate_images
 from image.postprocess import PROFILES, process_image
 from image.prompt_adapter import adapt_prompt, ImageProvider
+from llm.text_runner import complete_text
 from llm.stage_events import build_stage_event
 
 router = APIRouter()
@@ -48,6 +51,27 @@ async def _send_stage(ws: WebSocket, scope: str, stage: str, message: str):
     payload = build_stage_event(scope, stage, message)
     if payload:
         await _send(ws, "stage_update", payload)
+
+
+async def _send_approval_pending(ws: WebSocket, summary: str, requests: list):
+    await _send(ws, "approval_pending", {
+        "summary": summary,
+        "requests": [request.to_dict() for request in requests],
+    })
+
+
+async def _plan_approval_requests(description: str, llm_cfg: dict, project_root: Path):
+    prompt = build_action_prompt(description)
+    raw = await complete_text(prompt, llm_cfg, cwd=project_root)
+    plan = json.loads(raw)
+    service = get_approval_service()
+    summary = plan.get("summary", "Approval required before execution")
+    actions = service.create_requests_from_plan(
+        plan,
+        source_backend=llm_cfg.get("agent_backend", "unknown"),
+        source_workflow="single_asset",
+    )
+    return summary, actions
 
 
 @router.websocket("/ws/create")
@@ -188,6 +212,11 @@ async def ws_create(ws: WebSocket):
         await _send_stage(ws, "agent", "agent_running", "正在生成代码...")
         await _send(ws, "progress", {"message": "Code Agent 开始生成代码..."})
 
+        if cfg["llm"].get("execution_mode") == "approval_first":
+            summary, actions = await _plan_approval_requests(description, cfg["llm"], project_root)
+            await _send_approval_pending(ws, summary, actions)
+            return
+
         async def stream_to_ws(chunk: str):
             await _send(ws, "agent_stream", {"chunk": chunk})
 
@@ -239,6 +268,12 @@ async def _ws_run_custom_code(ws: WebSocket, params: dict, project_root: Path):
 
     await _send_stage(ws, "agent", "agent_running", "正在生成自定义代码...")
     await _send(ws, "progress", {"message": "Code Agent 开始生成自定义代码..."})
+
+    cfg = get_config()
+    if cfg["llm"].get("execution_mode") == "approval_first":
+        summary, actions = await _plan_approval_requests(description, cfg["llm"], project_root)
+        await _send_approval_pending(ws, summary, actions)
+        return
 
     async def stream_to_ws(chunk: str):
         await _send(ws, "agent_stream", {"chunk": chunk})
@@ -308,6 +343,12 @@ async def _ws_run_with_provided_image(ws: WebSocket, params: dict, project_root:
 
     await _send_stage(ws, "agent", "agent_running", "正在生成代码...")
     await _send(ws, "progress", {"message": "Code Agent 开始生成代码..."})
+
+    cfg = get_config()
+    if cfg["llm"].get("execution_mode") == "approval_first":
+        summary, actions = await _plan_approval_requests(description, cfg["llm"], project_root)
+        await _send_approval_pending(ws, summary, actions)
+        return
 
     async def stream_to_ws(chunk: str):
         await _send(ws, "agent_stream", {"chunk": chunk})

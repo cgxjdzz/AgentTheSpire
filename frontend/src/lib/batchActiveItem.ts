@@ -2,6 +2,7 @@ export type BatchItemStatus =
   | "pending"
   | "img_generating"
   | "awaiting_selection"
+  | "approval_pending"
   | "code_generating"
   | "done"
   | "error";
@@ -9,7 +10,7 @@ export type BatchItemStatus =
 export type BatchItemStateSnapshot = Record<string, { status?: BatchItemStatus }>;
 
 function needsAttention(status?: BatchItemStatus): boolean {
-  return status === "awaiting_selection" || status === "img_generating" || status === "code_generating";
+  return status === "awaiting_selection" || status === "approval_pending" || status === "img_generating" || status === "code_generating";
 }
 
 export function pickActiveItemOnStart(

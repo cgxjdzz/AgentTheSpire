@@ -4,6 +4,8 @@ import {
   CheckCircle2, XCircle, Clock, ImageIcon, Code2, Sparkles, AlertTriangle,
   Upload, Wand2,
 } from "lucide-react";
+import { ApprovalPanel } from "../components/ApprovalPanel";
+import { approveApproval, executeApproval, rejectApproval, type ApprovalRequest } from "../lib/approvals";
 import { BatchSocket, PlanItem, ModPlan } from "../lib/batch_ws";
 import { pickActiveItemOnDone, pickActiveItemOnStart } from "../lib/batchActiveItem";
 import { AgentLog } from "../components/AgentLog";
@@ -19,6 +21,7 @@ type ItemStatus =
   | "pending"
   | "img_generating"
   | "awaiting_selection"
+  | "approval_pending"
   | "code_generating"
   | "done"
   | "error";
@@ -34,6 +37,8 @@ interface ItemState {
   errorTrace: string | null;
   currentPrompt: string;
   showMorePrompt: boolean;
+  approvalSummary: string;
+  approvalRequests: ApprovalRequest[];
 }
 
 function defaultItemState(): ItemState {
@@ -48,6 +53,8 @@ function defaultItemState(): ItemState {
     errorTrace: null,
     currentPrompt: "",
     showMorePrompt: false,
+    approvalSummary: "",
+    approvalRequests: [],
   };
 }
 
@@ -66,6 +73,7 @@ const STATUS_ICONS: Record<ItemStatus, React.ReactNode> = {
   pending:            <Clock size={14} className="text-slate-300" />,
   img_generating:     <Loader2 size={14} className="text-amber-400 animate-spin" />,
   awaiting_selection: <ImageIcon size={14} className="text-amber-500" />,
+  approval_pending:   <Clock size={14} className="text-violet-500" />,
   code_generating:    <Code2 size={14} className="text-blue-400 animate-pulse" />,
   done:               <CheckCircle2 size={14} className="text-green-500" />,
   error:              <XCircle size={14} className="text-red-500" />,
@@ -75,6 +83,7 @@ const STATUS_LABELS: Record<ItemStatus, string> = {
   pending:            "等待中",
   img_generating:     "生成图像",
   awaiting_selection: "等待选图",
+  approval_pending:   "等待审批",
   code_generating:    "生成代码",
   done:               "完成",
   error:              "失败",
@@ -107,6 +116,7 @@ export default function BatchMode() {
   const [batchStageHistory, setBatchStageHistory] = useState<string[]>([]);
   const [globalError, setGlobalError] = useState<string | null>(null);
   const [batchResult, setBatchResult] = useState<{ success: number; error: number } | null>(null);
+  const [approvalBusyActionId, setApprovalBusyActionId] = useState<string | null>(null);
 
   const [autoSelectFirst, setAutoSelectFirst] = useState(false);
   const autoSelectRef = useRef(false);
@@ -232,6 +242,14 @@ export default function BatchMode() {
       }
     });
     ws.on("item_agent_stream", (d) => { appendAgent(d.item_id, d.chunk); });
+    ws.on("item_approval_pending", (d) => {
+      updateItem(d.item_id, {
+        status: "approval_pending",
+        approvalSummary: d.summary,
+        approvalRequests: d.requests,
+      });
+      setActiveItemId(prev => prev ?? d.item_id);
+    });
     ws.on("item_done", (d) => {
       updateItem(d.item_id, { status: "done" });
       setActiveItemId(prev => pickActiveItemOnDone(prev, d.item_id, itemStatesRef.current));
@@ -304,6 +322,34 @@ export default function BatchMode() {
     setGlobalError(null);
     setBatchResult(null);
     setActiveItemId(null);
+    setApprovalBusyActionId(null);
+  }
+
+  async function handleApprovalAction(
+    actionId: string,
+    action: (id: string) => Promise<ApprovalRequest>,
+  ) {
+    setApprovalBusyActionId(actionId);
+    try {
+      const updated = await action(actionId);
+      applyItemStates(prev => {
+        const next: Record<string, ItemState> = { ...prev };
+        for (const [id, state] of Object.entries(prev)) {
+          const nextRequests = state.approvalRequests.map(req => req.action_id === actionId ? updated : req);
+          const nextStatus =
+            state.status === "approval_pending" && nextRequests.length > 0 && nextRequests.every(req => req.status === "succeeded")
+              ? "done"
+              : state.status;
+          next[id] = { ...state, approvalRequests: nextRequests, status: nextStatus };
+        }
+        return next;
+      });
+    } catch (error) {
+      setGlobalError(error instanceof Error ? error.message : String(error));
+      setStage("error");
+    } finally {
+      setApprovalBusyActionId(null);
+    }
   }
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -408,6 +454,10 @@ export default function BatchMode() {
           onSelectImage={handleSelectImage}
           onGenerateMore={handleGenerateMore}
           onRetryItem={handleRetryItem}
+          approvalBusyActionId={approvalBusyActionId}
+          onApproveAction={(actionId) => { void handleApprovalAction(actionId, approveApproval); }}
+          onRejectAction={(actionId) => { void handleApprovalAction(actionId, (id) => rejectApproval(id)); }}
+          onExecuteAction={(actionId) => { void handleApprovalAction(actionId, executeApproval); }}
           onUpdatePrompt={(id, prompt) =>
             updateItem(id, { currentPrompt: prompt })
           }
@@ -605,7 +655,7 @@ function ExecutionView({
   items, itemStates, activeItemId, setActiveItemId,
   batchLog, currentBatchStage, batchStageHistory, batchResult, stage, projectRoot,
   autoSelectFirst, onAutoSelectToggle,
-  onSelectImage, onGenerateMore, onRetryItem, onUpdatePrompt, onToggleMorePrompt, onReset,
+  onSelectImage, onGenerateMore, onRetryItem, approvalBusyActionId, onApproveAction, onRejectAction, onExecuteAction, onUpdatePrompt, onToggleMorePrompt, onReset,
 }: {
   items: PlanItem[];
   itemStates: Record<string, ItemState>;
@@ -622,11 +672,16 @@ function ExecutionView({
   onSelectImage: (id: string, idx: number) => void;
   onGenerateMore: (id: string) => void;
   onRetryItem: (id: string) => void;
+  approvalBusyActionId: string | null;
+  onApproveAction: (actionId: string) => void;
+  onRejectAction: (actionId: string) => void;
+  onExecuteAction: (actionId: string) => void;
   onUpdatePrompt: (id: string, prompt: string) => void;
   onToggleMorePrompt: (id: string) => void;
   onReset: () => void;
 }) {
   const awaitingCount = items.filter(it => itemStates[it.id]?.status === "awaiting_selection").length;
+  const approvalCount = items.filter(it => itemStates[it.id]?.status === "approval_pending").length;
   const activeItem = items.find(it => it.id === activeItemId);
   const activeState = activeItemId ? itemStates[activeItemId] : null;
 
@@ -652,6 +707,11 @@ function ExecutionView({
         {awaitingCount > 0 && !autoSelectFirst && (
           <div className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5 mb-2 font-medium">
             {awaitingCount} 个图片等待选择
+          </div>
+        )}
+        {approvalCount > 0 && (
+          <div className="text-xs text-violet-600 bg-violet-50 border border-violet-200 rounded-lg px-2.5 py-1.5 mb-2 font-medium">
+            {approvalCount} 个资产等待审批
           </div>
         )}
 
@@ -699,14 +759,16 @@ function ExecutionView({
 
         {stage === "done" && batchResult && (
           <div className="mt-2 pt-2 border-t border-slate-100 space-y-2">
-            {batchResult.error === 0 ? (
+            {approvalCount > 0 ? (
+              <p className="text-xs text-violet-600 font-medium px-1">等待审批通过后继续执行</p>
+            ) : batchResult.error === 0 ? (
               <p className="text-xs text-green-600 font-medium px-1">✓ 全部完成</p>
             ) : (
               <p className="text-xs text-red-500 px-1">
                 {batchResult.success} 成功 / {batchResult.error} 失败
               </p>
             )}
-            <BuildDeploy projectRoot={projectRoot} />
+            {approvalCount === 0 && <BuildDeploy projectRoot={projectRoot} />}
             <button
               onClick={onReset}
               className="w-full py-1.5 rounded-lg border border-slate-200 text-slate-400 hover:text-amber-600 hover:border-amber-300 text-xs transition-colors flex items-center justify-center gap-1"
@@ -733,6 +795,10 @@ function ExecutionView({
             onSelectImage={(idx) => onSelectImage(activeItem.id, idx)}
             onGenerateMore={() => onGenerateMore(activeItem.id)}
             onRetryItem={() => onRetryItem(activeItem.id)}
+            approvalBusyActionId={approvalBusyActionId}
+            onApproveAction={onApproveAction}
+            onRejectAction={onRejectAction}
+            onExecuteAction={onExecuteAction}
             onUpdatePrompt={(p) => onUpdatePrompt(activeItem.id, p)}
             onToggleMorePrompt={() => onToggleMorePrompt(activeItem.id)}
           />
@@ -746,13 +812,17 @@ function ExecutionView({
 
 function ItemDetailPanel({
   item, state,
-  onSelectImage, onGenerateMore, onRetryItem, onUpdatePrompt, onToggleMorePrompt,
+  onSelectImage, onGenerateMore, onRetryItem, approvalBusyActionId, onApproveAction, onRejectAction, onExecuteAction, onUpdatePrompt, onToggleMorePrompt,
 }: {
   item: PlanItem;
   state: ItemState;
   onSelectImage: (idx: number) => void;
   onGenerateMore: () => void;
   onRetryItem: () => void;
+  approvalBusyActionId: string | null;
+  onApproveAction: (actionId: string) => void;
+  onRejectAction: (actionId: string) => void;
+  onExecuteAction: (actionId: string) => void;
   onUpdatePrompt: (p: string) => void;
   onToggleMorePrompt: () => void;
 }) {
@@ -771,6 +841,7 @@ function ItemDetailPanel({
           state.status === "done"               ? "bg-green-100 text-green-700" :
           state.status === "error"              ? "bg-red-100 text-red-600" :
           state.status === "awaiting_selection" ? "bg-amber-100 text-amber-700" :
+          state.status === "approval_pending"   ? "bg-violet-100 text-violet-700" :
           state.status === "code_generating"    ? "bg-blue-100 text-blue-600" :
                                                   "bg-slate-100 text-slate-500"
         )}>
@@ -782,6 +853,17 @@ function ItemDetailPanel({
       <StageStatus current={state.currentStage} history={state.stageHistory} isComplete={state.status === "done"} />
       {state.progress.length > 0 && (
         <AgentLog lines={state.progress} />
+      )}
+
+      {state.status === "approval_pending" && (
+        <ApprovalPanel
+          summary={state.approvalSummary}
+          requests={state.approvalRequests}
+          busyActionId={approvalBusyActionId}
+          onApprove={onApproveAction}
+          onReject={onRejectAction}
+          onExecute={onExecuteAction}
+        />
       )}
 
       {/* 图片画廊（等待选择时） */}
