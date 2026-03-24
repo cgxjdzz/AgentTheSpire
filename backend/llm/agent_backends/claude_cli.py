@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-import asyncio
 import json
 import os
-import subprocess
-import threading
 from pathlib import Path
+
+from ._runner import run_streaming
 
 
 def _extract_text(event: dict) -> str:
@@ -27,12 +26,18 @@ def _extract_text(event: dict) -> str:
                     or inp.get("prompt")
                     or ""
                 )
-                summary = f"[{name}] {detail}" if detail else f"[{name}]"
-                parts.append(summary + "\n")
+                parts.append(f"[{name}] {detail}\n" if detail else f"[{name}]\n")
         return "".join(parts)
     if event.get("type") == "result":
         return event.get("result", "")
     return ""
+
+
+def _process_line(line: str) -> str | None:
+    try:
+        return _extract_text(json.loads(line)) or None
+    except json.JSONDecodeError:
+        return line
 
 
 async def run(prompt: str, project_root: Path, llm_cfg: dict, stream_callback=None) -> str:
@@ -51,64 +56,12 @@ async def run(prompt: str, project_root: Path, llm_cfg: dict, stream_callback=No
         "-p", prompt,
     ]
 
-    loop = asyncio.get_event_loop()
-    line_queue: asyncio.Queue = asyncio.Queue()
-
-    def _reader():
-        try:
-            proc = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                cwd=str(project_root),
-                env=env,
-            )
-        except Exception as exc:
-            loop.call_soon_threadsafe(line_queue.put_nowait, ("error", str(exc)))
-            return
-
-        assert proc.stdout is not None
-        assert proc.stderr is not None
-
-        for raw_line in proc.stdout:
-            decoded = raw_line.decode("utf-8", errors="replace").strip()
-            if decoded:
-                loop.call_soon_threadsafe(line_queue.put_nowait, ("line", decoded))
-
-        stderr_text = proc.stderr.read().decode("utf-8", errors="replace").strip()
-        proc.wait()
-        loop.call_soon_threadsafe(
-            line_queue.put_nowait,
-            ("done", (proc.returncode, stderr_text)),
-        )
-
-    thread = threading.Thread(target=_reader, daemon=True)
-    thread.start()
-
-    full_output = []
-
-    while True:
-        tag, data = await line_queue.get()
-
-        if tag == "error":
-            thread.join()
-            raise RuntimeError(f"无法启动 Claude CLI: {data}")
-
-        if tag == "done":
-            returncode, stderr_text = data
-            thread.join()
-            if returncode != 0:
-                detail = stderr_text or "".join(full_output) or "(无输出)"
-                raise RuntimeError(f"Claude CLI 退出码 {returncode}\n{detail}")
-            return "".join(full_output)
-
-        try:
-            event = json.loads(data)
-            text = _extract_text(event)
-        except json.JSONDecodeError:
-            text = data
-
-        if text:
-            full_output.append(text)
-            if stream_callback:
-                await stream_callback(text)
+    output_chunks, _ = await run_streaming(
+        cmd,
+        cwd=project_root,
+        env=env,
+        name="Claude CLI",
+        process_line=_process_line,
+        stream_callback=stream_callback,
+    )
+    return "".join(output_chunks)

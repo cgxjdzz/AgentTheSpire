@@ -8,6 +8,7 @@ import asyncio
 import base64
 import io
 import json
+import logging
 import tempfile
 from pathlib import Path
 from typing import Literal
@@ -25,6 +26,7 @@ from image.prompt_adapter import adapt_prompt, ImageProvider
 from llm.text_runner import complete_text
 from llm.stage_events import build_stage_event
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 AssetType = Literal["card", "card_fullscreen", "relic", "power", "character"]
@@ -58,6 +60,21 @@ async def _send_approval_pending(ws: WebSocket, summary: str, requests: list):
         "summary": summary,
         "requests": [request.to_dict() for request in requests],
     })
+
+
+async def _maybe_await_approval(ws: WebSocket, description: str, llm_cfg: dict, project_root: Path) -> bool:
+    """审批模式下：发送待审批事件，等待用户确认。返回 True 表示继续执行，False 表示用户取消。"""
+    if llm_cfg.get("execution_mode") != "approval_first":
+        return True
+    summary, actions = await _plan_approval_requests(description, llm_cfg, project_root)
+    await _send_approval_pending(ws, summary, actions)
+    decision = json.loads(await ws.receive_text())
+    if decision.get("action") != "approve_all":
+        await _send(ws, "done", {"success": False, "image_paths": [], "agent_output": "用户取消执行"})
+        return False
+    await _send_stage(ws, "agent", "agent_running", "审批通过，开始生成代码...")
+    await _send(ws, "progress", {"message": "审批通过，Code Agent 开始生成代码..."})
+    return True
 
 
 async def _plan_approval_requests(description: str, llm_cfg: dict, project_root: Path):
@@ -98,6 +115,8 @@ async def ws_create(ws: WebSocket):
     - error: {message}
     """
     await ws.accept()
+    client = ws.client
+    logger.info("[ws/create] 连接建立 client=%s", client)
     try:
         # 1. 接收初始参数
         raw = await ws.receive_text()
@@ -108,14 +127,17 @@ async def ws_create(ws: WebSocket):
         asset_name: str = params["asset_name"]
         description: str = params["description"]
         project_root = Path(params["project_root"])
+        logger.info("[ws/create] asset_type=%s asset_name=%s project=%s", asset_type, asset_name, project_root)
 
         # custom_code 类型：跳过图片生成，直接走代码 agent
         if asset_type == "custom_code":
+            logger.info("[ws/create] 走 custom_code 分支")
             await _ws_run_custom_code(ws, params, project_root)
             return
 
         # 用户提供了图片（路径或 base64）：跳过生图/选图，直接后处理 + code agent
         if params.get("provided_image_path") or params.get("provided_image_b64"):
+            logger.info("[ws/create] 走 provided_image 分支")
             await _ws_run_with_provided_image(ws, params, project_root)
             return
 
@@ -212,9 +234,7 @@ async def ws_create(ws: WebSocket):
         await _send_stage(ws, "agent", "agent_running", "正在生成代码...")
         await _send(ws, "progress", {"message": "Code Agent 开始生成代码..."})
 
-        if cfg["llm"].get("execution_mode") == "approval_first":
-            summary, actions = await _plan_approval_requests(description, cfg["llm"], project_root)
-            await _send_approval_pending(ws, summary, actions)
+        if not await _maybe_await_approval(ws, description, cfg["llm"], project_root):
             return
 
         async def stream_to_ws(chunk: str):
@@ -233,11 +253,12 @@ async def ws_create(ws: WebSocket):
         })
 
     except WebSocketDisconnect:
-        pass
+        logger.info("[ws/create] 客户端主动断开 client=%s", client)
     except Exception as e:
         import traceback
         msg = _friendly_error(e)
         tb = traceback.format_exc()
+        logger.error("[ws/create] 未捕获异常 client=%s\n%s", client, tb)
         try:
             await _send(ws, "error", {"message": msg, "traceback": tb})
         except Exception:
@@ -270,9 +291,7 @@ async def _ws_run_custom_code(ws: WebSocket, params: dict, project_root: Path):
     await _send(ws, "progress", {"message": "Code Agent 开始生成自定义代码..."})
 
     cfg = get_config()
-    if cfg["llm"].get("execution_mode") == "approval_first":
-        summary, actions = await _plan_approval_requests(description, cfg["llm"], project_root)
-        await _send_approval_pending(ws, summary, actions)
+    if not await _maybe_await_approval(ws, description, cfg["llm"], project_root):
         return
 
     async def stream_to_ws(chunk: str):
@@ -345,9 +364,7 @@ async def _ws_run_with_provided_image(ws: WebSocket, params: dict, project_root:
     await _send(ws, "progress", {"message": "Code Agent 开始生成代码..."})
 
     cfg = get_config()
-    if cfg["llm"].get("execution_mode") == "approval_first":
-        summary, actions = await _plan_approval_requests(description, cfg["llm"], project_root)
-        await _send_approval_pending(ws, summary, actions)
+    if not await _maybe_await_approval(ws, description, cfg["llm"], project_root):
         return
 
     async def stream_to_ws(chunk: str):
