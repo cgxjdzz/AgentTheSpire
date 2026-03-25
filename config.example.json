@@ -1,9 +1,12 @@
 {
   "llm": {
-    "mode": "claude_subscription",
+    "mode": "agent_cli",
+    "agent_backend": "claude",
     "provider": "anthropic",
+    "model": "",
     "api_key": "",
-    "base_url": ""
+    "base_url": "",
+    "custom_prompt": ""
   },
   "image_gen": {
     "mode": "cloud",
@@ -20,7 +23,9 @@
   "mod_projects": [],
   "active_project": "",
 
-  "_注释_llm_provider可选值": ["anthropic", "moonshot", "deepseek", "qwen", "zhipu"],
+  "_注释_llm_mode可选值": ["agent_cli", "api"],
+  "_注释_llm_agent_backend可选值": ["claude", "codex"],
+  "_注释_llm_provider可选值": ["anthropic", "openai", "moonshot", "deepseek", "qwen", "zhipu"],
   "_注释_image_model可选值": ["flux.2-pro", "flux.2-flex", "flux.2-klein", "flux.2-max", "flux.2-dev", "flux.1.1-pro"],
   "_注释_image_provider可选值": ["bfl", "fal", "volcengine", "wanxiang"]
 }

@@ -21,12 +21,22 @@ _log = logging.getLogger("batch")
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from agents.code_agent import create_asset, create_asset_group, create_custom_code, create_mod_project
+from approval.action_prompt import build_action_prompt
+from approval.runtime import get_approval_service
+from agents.code_agent import (
+    build_and_fix,
+    create_asset,
+    create_asset_group,
+    create_custom_code,
+    create_mod_project,
+)
 from agents.planner import plan_mod, plan_from_dict, topological_sort, find_groups, PlanItem
 from config import get_config
 from image.generator import generate_images
 from image.postprocess import process_image
 from image.prompt_adapter import adapt_prompt, ImageProvider
+from llm.text_runner import complete_text
+from llm.stage_events import build_stage_event
 
 router = APIRouter()
 
@@ -45,6 +55,32 @@ def _img_provider_to_adapter(provider: str) -> ImageProvider:
 async def _run_postprocess(img, asset_type, asset_name, project_root):
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, process_image, img, asset_type, asset_name, project_root)
+
+
+async def _send_item_approval_pending(ws: WebSocket, item_id: str, summary: str, requests: list):
+    await ws.send_text(json.dumps({
+        "event": "item_approval_pending",
+        "item_id": item_id,
+        "summary": summary,
+        "requests": [request.to_dict() for request in requests],
+    }))
+
+
+async def _plan_group_approval_requests(group: list[PlanItem], llm_cfg: dict, project_root: Path):
+    requirements = "\n".join(
+        f"- [{item.type}] {item.name}: {item.description or item.implementation_notes}"
+        for item in group
+    )
+    prompt = build_action_prompt(requirements)
+    raw = await complete_text(prompt, llm_cfg, cwd=project_root)
+    plan = json.loads(raw)
+    summary = plan.get("summary", "This group requires approval before execution")
+    actions = get_approval_service().create_requests_from_plan(
+        plan,
+        source_backend=llm_cfg.get("agent_backend", "unknown"),
+        source_workflow="batch",
+    )
+    return summary, actions
 
 
 # ── HTTP 端点：规划 ────────────────────────────────────────────────────────────
@@ -89,6 +125,11 @@ async def ws_batch(ws: WebSocket):
     async def send(event: str, **data):
         await ws.send_text(json.dumps({"event": event, **data}))
 
+    async def send_stage(scope: str, stage: str, message: str, item_id: str | None = None):
+        payload = build_stage_event(scope, stage, message, item_id=item_id)
+        if payload:
+            await send("stage_update", **payload)
+
     try:
         # ── 1. 接收启动参数 ──────────────────────────────────────────────────
         raw = await ws.receive_text()
@@ -107,6 +148,7 @@ async def ws_batch(ws: WebSocket):
             requirements: str = params["requirements"]
 
             # ── 2. 规划 ──────────────────────────────────────────────────────
+            await send_stage("text", "planning", "正在规划 Mod...")
             await send("planning")
             plan = await plan_mod(requirements)
             await send("plan_ready", plan=plan.to_dict())
@@ -129,6 +171,7 @@ async def ws_batch(ws: WebSocket):
         if not list(project_root.glob("*.csproj")):
             project_name = project_root.name
             parent_dir = project_root.parent
+            await send_stage("project", "project_init", f"正在初始化项目 {project_name}...")
             await send("batch_progress", message=f"未检测到项目，正在创建 {project_name}...")
 
             async def _init_stream(chunk: str):
@@ -137,9 +180,9 @@ async def ws_batch(ws: WebSocket):
             project_root = await create_mod_project(project_name, parent_dir, _init_stream)
             await send("batch_progress", message=f"项目创建完成: {project_root}")
 
-        group_info = {
-            item.id: (i, len(group))
-            for i, group in enumerate(groups)
+        group_by_item = {
+            item.id: group
+            for group in groups
             for item in group
         }
         if any(len(g) > 1 for g in groups):
@@ -165,6 +208,7 @@ async def ws_batch(ws: WebSocket):
                     else:
                         img_desc = item.image_description or item.description
                         async with image_gen_sem:
+                            await send_stage("text", "prompt_adapting", "正在整理图像提示词...", item.id)
                             await send("item_progress", item_id=item.id, message="正在优化图像提示词...")
                             adapted = await adapt_prompt(
                                 img_desc, item.type, img_provider,
@@ -176,6 +220,7 @@ async def ws_batch(ws: WebSocket):
                         while True:
                             async with image_gen_sem:
                                 idx = len(all_images)
+                                await send_stage("image", "image_generating", f"正在生成第 {idx + 1} 张图像...", item.id)
                                 await send("item_progress", item_id=item.id, message=f"正在生成第 {idx + 1} 张图像...")
                                 async def _img_progress(msg: str, _id=item.id):
                                     await send("item_progress", item_id=_id, message=msg)
@@ -208,6 +253,7 @@ async def ws_batch(ws: WebSocket):
                             if result.get("negative_prompt") is not None:
                                 current_neg = result["negative_prompt"]
 
+                    await send_stage("image", "postprocess", "正在处理图像资产...", item.id)
                     await send("item_progress", item_id=item.id, message="正在处理图像资产...")
                     paths = await _run_postprocess(selected_img, item.type, item.name, project_root)
                     item_image_paths[item.id] = paths
@@ -246,12 +292,19 @@ async def ws_batch(ws: WebSocket):
                 # 向所有 item 发送代码生成开始的通知
                 first_id = group[0].id
                 for item in group:
+                    await send_stage("agent", "agent_running", "正在生成代码...", item.id)
                     await send("item_progress", item_id=item.id, message="Code Agent 开始生成代码...")
 
                 async def _stream(chunk: str):
                     await send("item_agent_stream", item_id=first_id, chunk=chunk)
 
                 try:
+                    if cfg_loaded["llm"].get("execution_mode") == "approval_first":
+                        summary, actions = await _plan_group_approval_requests(group, cfg_loaded["llm"], project_root)
+                        for item in group:
+                            await _send_item_approval_pending(ws, item.id, summary, actions)
+                        return
+
                     if len(group) == 1:
                         item = group[0]
                         if item.needs_image:
@@ -290,6 +343,23 @@ async def ws_batch(ws: WebSocket):
                     for item in group:
                         item_done_events[item.id].set()
 
+        async def retry_group_for_item(item_id: str):
+            group = group_by_item[item_id]
+            retry_item = items_by_id[item_id]
+
+            for item in group:
+                error_ids.discard(item.id)
+                item_done_events[item.id] = asyncio.Event()
+
+            rerun_images = retry_item.needs_image and retry_item.id not in item_image_paths
+            if rerun_images:
+                item_image_events[retry_item.id] = asyncio.Event()
+                tasks.append(asyncio.create_task(process_item_images(retry_item)))
+            else:
+                item_image_events.setdefault(retry_item.id, asyncio.Event()).set()
+
+            tasks.append(asyncio.create_task(process_group_code(group)))
+
         # ── 6. 启动所有任务 ───────────────────────────────────────────────────
         items_by_id = {item.id: item for item in sorted_items}
         tasks = [asyncio.create_task(process_item_images(item)) for item in sorted_items]
@@ -320,13 +390,8 @@ async def ws_batch(ws: WebSocket):
 
                 elif action == "retry_item" and item_id in items_by_id:
                     # 重置状态，重新跑该 item
-                    error_ids.discard(item_id)
-                    item_done_events[item_id] = asyncio.Event()
                     pending.add(item_id)
-                    tasks.append(asyncio.create_task(process_item(items_by_id[item_id])))
-                    await send("item_started", item_id=item_id,
-                               name=items_by_id[item_id].name,
-                               type=items_by_id[item_id].type)
+                    await retry_group_for_item(item_id)
 
             except asyncio.TimeoutError:
                 pass
@@ -338,7 +403,8 @@ async def ws_batch(ws: WebSocket):
         await asyncio.gather(*tasks)
 
         # ── 最终统一编译（所有资产代码写完后只编译一次）────────────────────────
-        if len(error_ids) < len(sorted_items):
+        if len(error_ids) < len(sorted_items) and cfg_loaded["llm"].get("execution_mode") != "approval_first":
+            await send_stage("build", "build_running", "正在统一编译与部署...")
             await send("batch_progress", message="所有资产代码生成完毕，开始统一编译...")
             async def _build_stream(chunk: str):
                 await send("batch_progress", message=chunk)

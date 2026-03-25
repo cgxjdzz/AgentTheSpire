@@ -13,6 +13,7 @@ from fastapi import APIRouter, WebSocket
 
 from config import get_config
 from llm.stream import stream_analysis
+from llm.stage_events import build_stage_event
 
 router = APIRouter()
 
@@ -39,6 +40,12 @@ _SYSTEM_PROMPT = """\
 
 请用中文回答，格式清晰，重点突出。
 """
+
+
+async def _send_stage(ws: WebSocket, scope: str, stage: str, message: str):
+    payload = build_stage_event(scope, stage, message)
+    if payload:
+        await ws.send_text(json.dumps({"event": "stage_update", **payload}))
 
 
 def _read_log() -> tuple[str, bool]:
@@ -104,6 +111,7 @@ async def ws_analyze_log(ws: WebSocket):
         extra_context = params.get("context", "")
 
         # 读日志
+        await _send_stage(ws, "text", "reading_input", "正在读取游戏日志...")
         log_content, exists = _read_log()
         if not exists:
             await ws.send_text(json.dumps({
@@ -116,15 +124,23 @@ async def ws_analyze_log(ws: WebSocket):
         await ws.send_text(json.dumps({"event": "log_info", "lines": line_count}))
 
         # 构建 prompt
+        await _send_stage(ws, "text", "preparing_prompt", "正在整理日志分析上下文...")
         prompt = _build_prompt(extra_context)
 
         cfg = get_config()
         llm_cfg = cfg["llm"]
+        streamed = False
 
         async def send_chunk(chunk: str):
+            nonlocal streamed
+            if not streamed:
+                streamed = True
+                await _send_stage(ws, "text", "ai_streaming", "AI 已开始输出分析结果...")
             await ws.send_text(json.dumps({"event": "stream", "chunk": chunk}))
 
+        await _send_stage(ws, "text", "ai_running", "正在调用 AI 分析日志...")
         full_text = await stream_analysis(_SYSTEM_PROMPT, prompt, llm_cfg, send_chunk)
+        await _send_stage(ws, "text", "done", "日志分析完成")
         await ws.send_text(json.dumps({"event": "done", "full": full_text}))
 
     except Exception as e:

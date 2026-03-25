@@ -3,9 +3,10 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 GODOT_VERSION="4.5.1"
-GODOT_INSTALL_DIR="$SCRIPT_DIR/godot"
-CONFIG_FILE="$SCRIPT_DIR/config.json"
+GODOT_INSTALL_DIR="$ROOT_DIR/godot"
+CONFIG_FILE="$ROOT_DIR/config.json"
 
 # 颜色输出
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
@@ -156,6 +157,6 @@ echo ""
 echo "   .NET 9 SDK : $(dotnet --version 2>/dev/null)"
 echo "   Godot 路径 : $GODOT_FROM_CONFIG"
 echo ""
-echo "   如果还没跑过 install.sh，现在可以运行了。"
+echo "   如果还没跑过 ./tools/install.sh，现在可以运行了。"
 echo " ============================================"
 echo ""

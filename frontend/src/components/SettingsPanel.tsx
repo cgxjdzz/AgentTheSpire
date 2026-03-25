@@ -11,6 +11,15 @@ const PROVIDER_MODELS: Record<string, string[]> = {
   wanxiang:    [],
 };
 
+const TEXT_PROVIDERS = [
+  { value: "anthropic", label: "Anthropic" },
+  { value: "openai", label: "OpenAI" },
+  { value: "moonshot", label: "Moonshot" },
+  { value: "deepseek", label: "DeepSeek" },
+  { value: "qwen", label: "Qwen" },
+  { value: "zhipu", label: "Zhipu" },
+];
+
 function SGroup({ icon, title, children }: { icon: React.ReactNode; title: string; children: React.ReactNode }) {
   return (
     <div className="space-y-3">
@@ -190,18 +199,72 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
 
               {/* ── LLM 配置 ── */}
               <SGroup icon={<Cpu size={14} />} title="LLM 配置">
-                <Field label="模式">
+                <Field label="文本任务模式" hint="规划、日志分析、提示词优化走这里的配置">
                   <select value={cfg.llm?.mode || ""} onChange={e => set(["llm", "mode"], e.target.value)} className={selectCls}>
-                    <option value="claude_subscription">Claude 订阅（claude CLI）</option>
-                    <option value="api">API Key</option>
-                    <option value="litellm">LiteLLM 代理</option>
+                    <option value="agent_cli">Agent CLI</option>
+                    <option value="api">API</option>
                   </select>
                 </Field>
+                <Field label="代码代理后端" hint="代码生成、编译修复、项目修改使用这个代理">
+                  <select
+                    value={cfg.llm?.agent_backend || "claude"}
+                    onChange={e => set(["llm", "agent_backend"], e.target.value)}
+                    className={selectCls}
+                  >
+                    <option value="claude">Claude CLI</option>
+                    <option value="codex">Codex CLI</option>
+                  </select>
+                </Field>
+                <Field
+                  label="代码执行模式"
+                  hint="审批模式：执行前展示操作预览，用户确认后再调用代理。推荐在使用 Codex 时开启。"
+                >
+                  <select
+                    value={cfg.llm?.execution_mode || "legacy_direct"}
+                    onChange={e => set(["llm", "execution_mode"], e.target.value)}
+                    className={selectCls}
+                  >
+                    <option value="legacy_direct">直接执行</option>
+                    <option value="approval_first">审批后执行</option>
+                  </select>
+                </Field>
+                {cfg.llm?.mode === "api" && (
+                  <Field label="API 提供商">
+                    <select
+                      value={cfg.llm?.provider || "anthropic"}
+                      onChange={e => set(["llm", "provider"], e.target.value)}
+                      className={selectCls}
+                    >
+                      {TEXT_PROVIDERS.map(provider => (
+                        <option key={provider.value} value={provider.value}>{provider.label}</option>
+                      ))}
+                    </select>
+                  </Field>
+                )}
+                {cfg.llm?.mode === "agent_cli" && (
+                  <Field label="CLI 模型（可选）" hint="留空使用 Codex 或 Claude CLI 的默认模型">
+                    <input
+                      value={cfg.llm?.model || ""}
+                      onChange={e => set(["llm", "model"], e.target.value)}
+                      placeholder="例如 gpt-5-codex / opus / sonnet"
+                      className={inputCls}
+                    />
+                  </Field>
+                )}
                 <Field label="API Key（留空不修改）">
                   <input value={llmKey} onChange={e => setLlmKey(e.target.value)} placeholder={cfg.llm?.api_key ? "已设置" : "未设置"} className={inputCls} />
                 </Field>
                 <Field label="Base URL（可选）">
                   <input value={cfg.llm?.base_url || ""} onChange={e => set(["llm", "base_url"], e.target.value)} placeholder="https://..." className={inputCls} />
+                </Field>
+                <Field label="AI 附加提示词" hint="会追加到全部 AI 调用，包括文本分析、规划、提示词优化和代码代理">
+                  <textarea
+                    value={cfg.llm?.custom_prompt || ""}
+                    onChange={e => set(["llm", "custom_prompt"], e.target.value)}
+                    placeholder="例如：始终用简体中文回答；优先最小改动；输出先给结论后给细节"
+                    rows={5}
+                    className={inputCls + " min-h-28 resize-y"}
+                  />
                 </Field>
               </SGroup>
 

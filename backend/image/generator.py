@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import io
+import logging
 import threading
 from typing import AsyncIterator
 
@@ -14,6 +15,8 @@ import httpx
 from PIL import Image
 
 from config import get_config
+
+logger = logging.getLogger(__name__)
 
 # ── FLUX.2 via BFL 官方 API ─────────────────────────────────────────────────
 
@@ -48,6 +51,7 @@ async def _generate_bfl(
 ) -> list[Image.Image]:
     endpoint = BFL_MODELS.get(model, "flux_2/flux2_text_to_image")
     model_id = BFL_MODEL_IDS.get(model, "flux.2-pro")
+    logger.info("[BFL] 提交 %d 张 model=%s %dx%d", batch_size, model_id, width, height)
 
     async with httpx.AsyncClient(timeout=120) as client:
         tasks = []
@@ -79,11 +83,13 @@ async def _generate_bfl(
         async with httpx.AsyncClient(timeout=60) as client:
             img_resp = await client.get(url)
             images.append(Image.open(io.BytesIO(img_resp.content)))
+    logger.info("[BFL] 下载完成，共 %d 张", len(images))
     return images
 
 
 async def _poll_bfl_result(task_id: str, api_key: str, max_wait: int = 120) -> str:
     """轮询 BFL 任务，返回图片 URL。"""
+    logger.debug("[BFL] 开始轮询 task_id=%s", task_id)
     async with httpx.AsyncClient(timeout=30) as client:
         for _ in range(max_wait // 2):
             await asyncio.sleep(2)
@@ -94,9 +100,12 @@ async def _poll_bfl_result(task_id: str, api_key: str, max_wait: int = 120) -> s
             )
             data = resp.json()
             if data.get("status") == "Ready":
+                logger.debug("[BFL] task_id=%s Ready", task_id)
                 return data["result"]["sample"]
             if data.get("status") in ("Error", "Failed"):
+                logger.error("[BFL] task_id=%s 失败: %s", task_id, data)
                 raise RuntimeError(f"BFL task failed: {data}")
+    logger.error("[BFL] task_id=%s 超时 (max_wait=%ds)", task_id, max_wait)
     raise TimeoutError(f"BFL task {task_id} timed out")
 
 
@@ -164,6 +173,7 @@ async def _generate_volcengine(
     import json as _json
     loop = asyncio.get_running_loop()
     w, h = _snap_jimeng_size(width, height)
+    logger.info("[即梦] 提交 %d 张 %dx%d (snap from %dx%d)", batch_size, w, h, width, height)
 
     async def _progress(msg: str):
         if progress_callback:
@@ -186,8 +196,10 @@ async def _generate_volcengine(
             }
             res = await loop.run_in_executor(None, _run_jimeng_sync, ak, sk, submit_body)
             if res.get("code") != 10000:
+                logger.error("[即梦] 第%d张提交失败: %s", i+1, res)
                 raise RuntimeError(f"即梦提交任务失败 (第{i+1}张): {res}")
             task_id = res["data"]["task_id"]
+            logger.info("[即梦] 第%d张 task_id=%s", i+1, task_id)
 
             # 轮询直到完成
             for attempt in range(60):
@@ -207,6 +219,7 @@ async def _generate_volcengine(
                 status = data.get("status", "")
                 if status in ("done", "success", 2, "2"):
                     await _progress(f"第 {i+1} 张生成完成，正在下载…")
+                    logger.info("[即梦] 第%d张完成 task_id=%s", i+1, task_id)
                     urls = data.get("image_urls") or []
                     if not urls and data.get("binary_data_base64"):
                         for b64 in data["binary_data_base64"]:
@@ -217,8 +230,10 @@ async def _generate_volcengine(
                             images.append(Image.open(io.BytesIO(resp.content)))
                     break
                 if status in ("failed", "error", 3, "3"):
+                    logger.error("[即梦] 第%d张任务失败 task_id=%s: %s", i+1, task_id, result)
                     raise RuntimeError(f"即梦任务失败 (第{i+1}张): {result}")
             else:
+                logger.error("[即梦] 第%d张超时 task_id=%s", i+1, task_id)
                 raise TimeoutError(f"即梦任务 {task_id} 超时 (第{i+1}张)")
     return images
 

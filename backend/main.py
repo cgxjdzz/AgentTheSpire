@@ -23,6 +23,7 @@ from routers.batch_workflow import router as batch_router
 from routers.log_analyzer import router as log_analyzer_router
 from routers.mod_analyzer import router as mod_analyzer_router
 from routers.build_deploy import router as build_deploy_router
+from routers.approval_router import router as approval_router
 
 app = FastAPI(title="AgentTheSpire", version="0.1.0")
 
@@ -40,6 +41,7 @@ app.include_router(batch_router,       prefix="/api")
 app.include_router(log_analyzer_router, prefix="/api")
 app.include_router(mod_analyzer_router,  prefix="/api")
 app.include_router(build_deploy_router,  prefix="/api")
+app.include_router(approval_router,      prefix="/api")
 
 # 生产模式下托管前端静态文件
 _frontend_dist = Path(__file__).parent.parent / "frontend" / "dist"

@@ -8,13 +8,15 @@
     </MappedFolder>
     <!-- sandbox output (writable) -->
     <MappedFolder>
-      <HostFolder>{{PROJECT_ROOT}}\scripts\sandbox_output</HostFolder>
+      <HostFolder>{{PROJECT_ROOT}}\tools\sandbox_output</HostFolder>
       <SandboxFolder>C:\sandbox_output</SandboxFolder>
       <ReadOnly>false</ReadOnly>
     </MappedFolder>
   </MappedFolders>
   <LogonCommand>
-    <Command>C:\Windows\System32\cmd.exe /c "C:\AgentTheSpire_host\scripts\sandbox_setup.bat" > C:\sandbox_output\install_log.txt 2>&1</Command>
+    <Command>C:\Windows\System32\cmd.exe /c "C:\AgentTheSpire_host\tools\sandbox_setup.bat" > C:\sandbox_output\install_log.txt 2>&1</Command>
   </LogonCommand>
   <MemoryInMB>4096</MemoryInMB>
 </Configuration>
+
+

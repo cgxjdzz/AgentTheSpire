@@ -2,6 +2,8 @@
 chcp 65001 >nul
 setlocal enabledelayedexpansion
 title AgentTheSpire — Mod 开发依赖安装
+set "SCRIPT_DIR=%~dp0"
+for %%I in ("%SCRIPT_DIR%..") do set "ROOT_DIR=%%~fI"
 
 echo.
 echo  ============================================
@@ -10,8 +12,8 @@ echo    .NET 9 SDK  +  Godot 4.5.1 Mono
 echo  ============================================
 echo.
 
-:: Godot 默认解压到脚本同级目录下的 godot\ 文件夹
-set "GODOT_INSTALL_DIR=%~dp0godot"
+:: Godot 默认解压到仓库根目录下的 godot\ 文件夹
+set "GODOT_INSTALL_DIR=%ROOT_DIR%\godot"
 set "GODOT_EXE=%GODOT_INSTALL_DIR%\Godot_v4.5.1-stable_mono_win64\Godot_v4.5.1-stable_mono_win64.exe"
 set "GODOT_DOWNLOAD_URL=https://github.com/godotengine/godot/releases/download/4.5.1-stable/Godot_v4.5.1-stable_mono_win64.zip"
 set "GODOT_ZIP=%TEMP%\godot_4.5.1_mono.zip"
@@ -54,7 +56,7 @@ if not defined DOTNET_NEW (
     :: winget 安装后需要新开终端才能识别，提示用户
     echo.
     echo [提示] .NET 9 安装完成，但当前终端可能无法识别新路径。
-    echo        请关闭此窗口，重新运行 setup_mod_deps.bat 继续。
+    echo        请关闭此窗口，重新运行 tools\setup_mod_deps.bat 继续。
     pause & exit /b 0
 )
 echo [OK] .NET 9 SDK 安装完成
@@ -65,7 +67,7 @@ echo.
 echo [Godot 4.5.1 Mono]
 
 :: 先读 config.json 里有没有配置路径
-set "CONFIG_FILE=%~dp0config.json"
+set "CONFIG_FILE=%ROOT_DIR%\config.json"
 set "GODOT_FROM_CONFIG="
 if exist "!CONFIG_FILE!" (
     for /f "delims=" %%l in ('python -c "import json,pathlib; p=pathlib.Path(r'!CONFIG_FILE!'); cfg=json.loads(p.read_text()); print(cfg.get('godot_exe_path',''))" 2^>nul') do (
@@ -155,7 +157,7 @@ set "GODOT_JSON_PATH=!GODOT_FROM_CONFIG:\=\\!"
 
 python -c "
 import json, pathlib
-p = pathlib.Path(r'%~dp0config.json')
+p = pathlib.Path(r'%ROOT_DIR%\config.json')
 cfg = json.loads(p.read_text(encoding='utf-8')) if p.exists() else {}
 cfg['godot_exe_path'] = r'!GODOT_FROM_CONFIG!'
 p.write_text(json.dumps(cfg, indent=2, ensure_ascii=False), encoding='utf-8')
@@ -173,8 +175,9 @@ echo.
 echo    .NET 9 SDK : 已就绪
 echo    Godot 路径 : !GODOT_FROM_CONFIG!
 echo.
-echo    如果之前还没跑过 install.bat，
-echo    现在可以运行 install.bat 了。
+echo    如果之前还没跑过 tools\install.bat，
+echo    现在可以运行 tools\install.bat 了。
 echo  ============================================
 echo.
 pause
+

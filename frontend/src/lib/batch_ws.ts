@@ -1,3 +1,5 @@
+import type { ApprovalRequest } from "./approvals";
+
 /**
  * WebSocket client for the AgentTheSpire batch workflow.
  */
@@ -5,12 +7,14 @@
 export type BatchEvent =
   | { event: "planning" }
   | { event: "plan_ready"; plan: ModPlan }
+  | { event: "stage_update"; scope: "project" | "text" | "image" | "agent" | "build"; stage: string; message: string; item_id?: string }
   | { event: "batch_progress"; message: string }
   | { event: "batch_started"; items: PlanItem[] }
   | { event: "item_started";      item_id: string; name: string; type: string }
   | { event: "item_progress";     item_id: string; message: string }
   | { event: "item_image_ready";  item_id: string; image: string; index: number; prompt: string }
   | { event: "item_agent_stream"; item_id: string; chunk: string }
+  | { event: "item_approval_pending"; item_id: string; summary: string; requests: ApprovalRequest[] }
   | { event: "item_done";         item_id: string; success: boolean }
   | { event: "item_error";        item_id: string; message: string; traceback?: string }
   | { event: "batch_done";        success_count: number; error_count: number }

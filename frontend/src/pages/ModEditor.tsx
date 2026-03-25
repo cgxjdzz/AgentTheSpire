@@ -1,6 +1,7 @@
 import { useRef, useState, useEffect } from "react";
 import { Loader2, Search, Wrench, RotateCcw } from "lucide-react";
 import { AgentLog } from "../components/AgentLog";
+import { StageStatus } from "../components/StageStatus";
 import { BuildDeploy } from "../components/BuildDeploy";
 import { WorkflowSocket } from "../lib/ws";
 
@@ -20,6 +21,8 @@ export default function ModEditor() {
   const [analyzeStage, setAnalyzeStage] = useState<AnalyzeStage>("idle");
   const [scanFiles, setScanFiles] = useState<number | null>(null);
   const [analysisChunks, setAnalysisChunks] = useState<string[]>([]);
+  const [analysisCurrentStage, setAnalysisCurrentStage] = useState<string | null>(null);
+  const [analysisStageHistory, setAnalysisStageHistory] = useState<string[]>([]);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const analyzeWsRef = useRef<WebSocket | null>(null);
 
@@ -27,6 +30,8 @@ export default function ModEditor() {
   const [modRequest, setModRequest] = useState("");
   const [modifyStage, setModifyStage] = useState<ModifyStage>("idle");
   const [agentLog, setAgentLog] = useState<string[]>([]);
+  const [modifyCurrentStage, setModifyCurrentStage] = useState<string | null>(null);
+  const [modifyStageHistory, setModifyStageHistory] = useState<string[]>([]);
   const [modifyError, setModifyError] = useState<string | null>(null);
   const modifyWsRef = useRef<WorkflowSocket | null>(null);
 
@@ -37,6 +42,8 @@ export default function ModEditor() {
     setAnalyzeStage("scanning");
     setScanFiles(null);
     setAnalysisChunks([]);
+    setAnalysisCurrentStage(null);
+    setAnalysisStageHistory([]);
     setAnalysisError(null);
 
     const ws = new WebSocket(`ws://${location.host}/api/ws/analyze-mod`);
@@ -46,7 +53,10 @@ export default function ModEditor() {
 
     ws.onmessage = (e) => {
       const msg = JSON.parse(e.data);
-      if (msg.event === "scan_info") {
+      if (msg.event === "stage_update") {
+        setAnalysisCurrentStage(msg.message);
+        setAnalysisStageHistory(prev => prev[prev.length - 1] === msg.message ? prev : [...prev, msg.message]);
+      } else if (msg.event === "scan_info") {
         setScanFiles(msg.files);
         setAnalyzeStage("streaming");
       } else if (msg.event === "stream") {
@@ -71,6 +81,8 @@ export default function ModEditor() {
     setAnalyzeStage("idle");
     setScanFiles(null);
     setAnalysisChunks([]);
+    setAnalysisCurrentStage(null);
+    setAnalysisStageHistory([]);
     setAnalysisError(null);
   }
 
@@ -80,11 +92,17 @@ export default function ModEditor() {
     if (!projectRoot.trim() || !modRequest.trim()) return;
     setModifyStage("running");
     setAgentLog([]);
+    setModifyCurrentStage(null);
+    setModifyStageHistory([]);
     setModifyError(null);
 
     const ws = new WorkflowSocket();
     modifyWsRef.current = ws;
 
+    ws.on("stage_update", (d: any) => {
+      setModifyCurrentStage(d.message);
+      setModifyStageHistory(prev => prev[prev.length - 1] === d.message ? prev : [...prev, d.message]);
+    });
     ws.on("progress",     (d: any) => setAgentLog(p => [...p, d.message]));
     ws.on("agent_stream", (d: any) => setAgentLog(p => [...p, d.chunk]));
     ws.on("done",         (d: any) => {
@@ -118,6 +136,8 @@ export default function ModEditor() {
     modifyWsRef.current = null;
     setModifyStage("idle");
     setAgentLog([]);
+    setModifyCurrentStage(null);
+    setModifyStageHistory([]);
     setModifyError(null);
   }
 
@@ -168,13 +188,16 @@ export default function ModEditor() {
         )}
 
         {isAnalyzing && (
-          <div className="flex items-center gap-2 py-1">
-            <Loader2 size={14} className="text-amber-500 animate-spin" />
-            <span className="text-sm text-slate-400">
-              {analyzeStage === "scanning"
-                ? "正在扫描源码文件…"
-                : `已扫描 ${scanFiles} 个文件，AI 分析中…`}
-            </span>
+          <div className="space-y-3">
+            <div className="flex items-center gap-2 py-1">
+              <Loader2 size={14} className="text-amber-500 animate-spin" />
+              <span className="text-sm text-slate-400">
+                {analyzeStage === "scanning"
+                  ? "正在扫描源码文件…"
+                  : `已扫描 ${scanFiles} 个文件，AI 分析中…`}
+              </span>
+            </div>
+            <StageStatus current={analysisCurrentStage} history={analysisStageHistory} />
           </div>
         )}
 
@@ -232,9 +255,12 @@ export default function ModEditor() {
             )}
           </div>
         ) : (
-          <div className="flex items-center gap-2 py-1">
-            <Loader2 size={14} className="text-amber-500 animate-spin" />
-            <span className="text-sm text-slate-400">Code Agent 执行中…</span>
+          <div className="space-y-3">
+            <div className="flex items-center gap-2 py-1">
+              <Loader2 size={14} className="text-amber-500 animate-spin" />
+              <span className="text-sm text-slate-400">Code Agent 执行中…</span>
+            </div>
+            <StageStatus current={modifyCurrentStage} history={modifyStageHistory} />
           </div>
         )}
 

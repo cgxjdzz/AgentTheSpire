@@ -37,12 +37,12 @@ Describe your card, relic, or power in plain text — AgentTheSpire generates th
 git clone https://github.com/yourname/AgentTheSpire.git
 cd AgentTheSpire
 
-install.bat           # Python deps + frontend build
-setup_mod_deps.bat    # .NET 9 + Godot 4.5.1
+tools\install.bat           # Python deps + frontend build
+tools\setup_mod_deps.bat    # .NET 9 + Godot 4.5.1
 
 # Copy config.example.json → config.json, fill in your API keys and game path
 
-start.bat             # Opens http://localhost:7860
+tools\start.bat             # Opens http://localhost:7860
 ```
 
 See [TUTORIAL.md](TUTORIAL.md) for full setup and configuration guide.
@@ -82,12 +82,12 @@ See [TUTORIAL.md](TUTORIAL.md) for full setup and configuration guide.
 git clone https://github.com/yourname/AgentTheSpire.git
 cd AgentTheSpire
 
-install.bat           # 安装 Python 依赖，构建前端
-setup_mod_deps.bat    # 安装 .NET 9 + Godot 4.5.1
+tools\install.bat           # 安装 Python 依赖，构建前端
+tools\setup_mod_deps.bat    # 安装 .NET 9 + Godot 4.5.1
 
 # 复制 config.example.json → config.json，填入 API Key 和游戏路径
 
-start.bat             # 打开 http://localhost:7860
+tools\start.bat             # 打开 http://localhost:7860
 ```
 
 详细配置说明见 [TUTORIAL.md](TUTORIAL.md)。
@@ -126,12 +126,15 @@ AgentTheSpire/
 │   └── routers/      # API routes
 ├── frontend/         # React + TypeScript UI
 ├── mod_template/     # C#/.NET Godot mod template
-├── scripts/          # Decompiler, sandbox tests
-├── install.bat/.sh
-├── setup_mod_deps.bat/.sh
-└── start.bat/.sh
+└── tools/            # Install/start helpers, decompiler, sandbox tests
 ```
 
 ## License
 
 MIT
+
+
+
+
+
+

@@ -17,15 +17,29 @@ frontend/.env
 # Local machine paths (mod dev)
 local.props
 
-# sts2.dll 反编译输出（版权内容，不进 git；由用户运行 scripts/decompile_sts2.py 生成）
+# sts2.dll 反编译输出（版权内容，不进 git；由用户运行 tools/decompile_sts2.py 生成）
 sts2_decompiled/
 
-# 沙箱测试配置（含本机绝对路径；由 scripts/generate_sandbox_wsb.bat 生成）
-scripts/sandbox_test.wsb
+# 沙箱测试配置（含本机绝对路径；由 tools/generate_sandbox_wsb.bat 生成）
+tools/sandbox_test.wsb
 
 # Install log
 install.log
+install-*.log
+
+# Mod projects (generated locally, not tracked in this repo)
+FangedGrimoire/
+
+# Generated local assets / outputs
+godot/
+docs/
 
 # OS
 .DS_Store
 Thumbs.db
+
+# Claude Code local settings
+.claude/
+
+# Godot import metadata (auto-generated, not committed)
+**/*.import

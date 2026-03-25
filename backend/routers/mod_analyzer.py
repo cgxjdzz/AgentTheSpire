@@ -10,6 +10,7 @@ from fastapi import APIRouter, WebSocket
 
 from config import get_config
 from llm.stream import stream_analysis
+from llm.stage_events import build_stage_event
 
 router = APIRouter()
 
@@ -27,6 +28,12 @@ _SYSTEM_PROMPT = """\
 格式要清晰，数值要具体，方便用户后续描述想修改哪里。
 如果某类内容不存在，可以省略该节。
 """
+
+
+async def _send_stage(ws: WebSocket, scope: str, stage: str, message: str):
+    payload = build_stage_event(scope, stage, message)
+    if payload:
+        await ws.send_text(json.dumps({"event": "stage_update", **payload}))
 
 
 def _scan_mod_files(project_root: Path) -> tuple[str, int]:
@@ -108,6 +115,7 @@ async def ws_analyze_mod(ws: WebSocket):
             }))
             return
 
+        await _send_stage(ws, "text", "reading_input", "正在扫描 Mod 源码...")
         file_content, file_count = _scan_mod_files(project_root)
 
         if not file_content.strip():
@@ -119,6 +127,7 @@ async def ws_analyze_mod(ws: WebSocket):
 
         await ws.send_text(json.dumps({"event": "scan_info", "files": file_count}))
 
+        await _send_stage(ws, "text", "preparing_prompt", "正在整理源码分析上下文...")
         prompt = (
             f"以下是 mod 项目的源码（路径：{project_root}）：\n\n"
             f"```\n{file_content}\n```\n\n"
@@ -127,11 +136,18 @@ async def ws_analyze_mod(ws: WebSocket):
 
         cfg = get_config()
         llm_cfg = cfg["llm"]
+        streamed = False
 
         async def send_chunk(chunk: str):
+            nonlocal streamed
+            if not streamed:
+                streamed = True
+                await _send_stage(ws, "text", "ai_streaming", "AI 已开始输出分析结果...")
             await ws.send_text(json.dumps({"event": "stream", "chunk": chunk}))
 
+        await _send_stage(ws, "text", "ai_running", "正在调用 AI 分析 Mod...")
         full_text = await stream_analysis(_SYSTEM_PROMPT, prompt, llm_cfg, send_chunk)
+        await _send_stage(ws, "text", "done", "Mod 分析完成")
         await ws.send_text(json.dumps({"event": "done", "full": full_text}))
 
     except Exception as e:

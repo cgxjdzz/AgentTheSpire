@@ -6,145 +6,16 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
-import subprocess
-import threading
 from pathlib import Path
 
 from config import get_config, get_decompiled_src_path
 from agents.sts2_docs import get_docs_for_type, API_REF_PATH, BASELIB_SRC_PATH
+from llm.agent_runner import run_agent_task
 
 
-# ── Claude Code subprocess 封装 ──────────────────────────────────────────────
-
-async def run_claude_code(
-    prompt: str,
-    project_root: Path,
-    stream_callback=None,
-) -> str:
-    """
-    调用 claude CLI，流式返回输出。
-    stream_callback(chunk: str) 用于 WebSocket 推流。
-    返回最终完整输出文本。
-
-    使用同步 subprocess.Popen + 后台线程读取 stdout，
-    通过 asyncio.Queue 桥接到 async 上下文，兼容 Windows SelectorEventLoop。
-    """
-    cfg = get_config()
-    llm_cfg = cfg["llm"]
-
-    env = os.environ.copy()
-
-    if llm_cfg["mode"] == "claude_subscription":
-        pass
-    else:
-        env["ANTHROPIC_API_KEY"] = llm_cfg["api_key"]
-        if llm_cfg.get("base_url"):
-            env["ANTHROPIC_BASE_URL"] = llm_cfg["base_url"]
-
-    cmd = [
-        "claude",
-        "--print",
-        "--verbose",
-        "--dangerously-skip-permissions",
-        "--output-format", "stream-json",
-        "-p", prompt,
-    ]
-
-    loop = asyncio.get_event_loop()
-    line_queue: asyncio.Queue = asyncio.Queue()
-
-    # 在子线程中同步启动进程并逐行读取
-    def _reader():
-        try:
-            proc = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                cwd=str(project_root),
-                env=env,
-            )
-        except Exception as exc:
-            loop.call_soon_threadsafe(line_queue.put_nowait, ("error", str(exc)))
-            return
-
-        for raw_line in proc.stdout:
-            decoded = raw_line.decode("utf-8", errors="replace").strip()
-            if decoded:
-                loop.call_soon_threadsafe(line_queue.put_nowait, ("line", decoded))
-
-        stderr_text = proc.stderr.read().decode("utf-8", errors="replace").strip()
-        proc.wait()
-        loop.call_soon_threadsafe(
-            line_queue.put_nowait,
-            ("done", (proc.returncode, stderr_text)),
-        )
-
-    thread = threading.Thread(target=_reader, daemon=True)
-    thread.start()
-
-    full_output = []
-
-    while True:
-        tag, data = await line_queue.get()
-
-        if tag == "error":
-            thread.join()
-            raise RuntimeError(f"无法启动 Claude CLI: {data}")
-
-        if tag == "done":
-            returncode, stderr_text = data
-            thread.join()
-            if returncode != 0:
-                detail = stderr_text or "".join(full_output) or "(无输出)"
-                raise RuntimeError(
-                    f"Claude CLI 退出码 {returncode}\n{detail}"
-                )
-            return "".join(full_output)
-
-        # tag == "line"
-        try:
-            event = json.loads(data)
-            text = _extract_text(event)
-            if text:
-                full_output.append(text)
-                if stream_callback:
-                    await stream_callback(text)
-        except json.JSONDecodeError:
-            full_output.append(data)
-            if stream_callback:
-                await stream_callback(data)
-
-
-def _extract_text(event: dict) -> str:
-    """从 claude --output-format stream-json 的事件中提取文本。"""
-    # assistant message（文本 + 工具调用）
-    if event.get("type") == "assistant" and event.get("message"):
-        msg = event["message"]
-        parts = []
-        for block in msg.get("content", []):
-            if not isinstance(block, dict):
-                continue
-            if block.get("type") == "text":
-                parts.append(block["text"])
-            elif block.get("type") == "tool_use":
-                name = block.get("name", "Tool")
-                inp = block.get("input", {})
-                # 只取最有用的字段显示
-                detail = (
-                    inp.get("command")
-                    or inp.get("file_path")
-                    or inp.get("pattern")
-                    or inp.get("prompt")
-                    or ""
-                )
-                summary = f"[{name}] {detail}" if detail else f"[{name}]"
-                parts.append(summary + "\n")
-        return "".join(parts)
-    # result
-    if event.get("type") == "result":
-        return event.get("result", "")
-    return ""
+async def run_claude_code(prompt: str, project_root: Path, stream_callback=None) -> str:
+    """兼容旧调用名，实际走统一 agent runner。"""
+    return await run_agent_task(prompt, project_root, stream_callback)
 
 
 # ── API lookup prompt 段落（根据配置动态生成）────────────────────────────────
@@ -252,8 +123,8 @@ Steps to complete:
    - Cards MUST have [Pool(typeof(SomeCardPool))] attribute (e.g. ColorlessCardPool) — without it the game crashes on startup.
    - Do NOT create a Harmony patch to manually add cards to pools — BaseLib autoAdd handles this.
 4. Create BOTH localization files:
-   - `{asset_name}/localization/eng/<type>s.json` — English
-   - `{asset_name}/localization/zhs/<type>s.json` — Simplified Chinese
+   - `{project_root.name}/localization/eng/<type>s.json` — English
+   - `{project_root.name}/localization/zhs/<type>s.json` — Simplified Chinese
 5. Register it in MainFile.cs if needed (BaseLib handles most registration automatically).
 {build_step}
 
